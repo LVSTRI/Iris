@@ -190,9 +190,9 @@ int main() {
     }
 
     auto models = std::vector<iris::model_t>();
-    // models.emplace_back(iris::model_t::create("../models/deccer-cubes/SM_Deccer_Cubes_Textured.gltf"));
+    models.emplace_back(iris::model_t::create("../models/deccer-cubes/SM_Deccer_Cubes_Textured.gltf"));
     // models.emplace_back(iris::model_t::create("../models/San_Miguel/san-miguel.obj"));
-    models.emplace_back(iris::model_t::create("../models/sponza/Sponza.gltf"));
+    // models.emplace_back(iris::model_t::create("../models/sponza/Sponza.gltf"));
     // models.emplace_back(iris::model_t::create("../models/chess/ABeautifulGame.gltf"));
 
     auto transforms = std::vector<glm::mat4>();

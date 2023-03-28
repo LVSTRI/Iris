@@ -13,3 +13,6 @@
 [submodule "deps/stb"]
 	path = deps/stb
 	url = https://github.com/nothings/stb
+[submodule "models/deccer-cubes"]
+	path = models/deccer-cubes
+	url = https://github.com/GraphicsProgramming/deccer-cubes
