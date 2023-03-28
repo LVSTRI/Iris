@@ -10,13 +10,15 @@ The keybindings are as follows:
 - `ESC`: Exits the application;
 - `F1`: Recaptures the frustum;
 - `W,A,S,D`: FPS camera movement;
+- `Shift`: Lowers the camera's y;
+- `Space`: Raises the camera's y;
 - `F`: Displays the AABB boxes of the objects;
 - `Right Mouse Button`: Enables the camera to be moved around;
 - `Left Mouse Button`: Pick objects in 3D space;
 
 ## Building
 To build this project you will need [CMake](https://cmake.org/) and a C++ compiler. Futhermore you will need to install
-[Python](https://www.python.org/) and [Pip](https://pypi.org/project/pip/) to install the Python dependencies (`jinja2`).
+[Python](https://www.python.org/) and [Pip](https://pypi.org/project/pip/) to install dependencies (`jinja2`).
 
 Installing `jinja2` requires `pip install jinja2` in your terminal;
 Compiling the project requires the following commands:
