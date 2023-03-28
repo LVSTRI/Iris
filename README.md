@@ -17,8 +17,11 @@ The keybindings are as follows:
 ## Building
 To build this project you will need [CMake](https://cmake.org/) and a C++ compiler. Futhermore you will need to install
 [Python](https://www.python.org/) and [Pip](https://pypi.org/project/pip/) to install the Python dependencies (`jinja2`).
-Installing `jinja2` is as simple as running `pip install jinja2` in your terminal;
+
+Installing `jinja2` requires `pip install jinja2` in your terminal;
 Compiling the project requires the following commands:
+- `git clone --recursive [This Repo]`
+- `cd [This Repo]`
 - `mkdir build && cd build`
 - `cmake .. -G [Your Favourite Generator]`
 - `cmake --build . --target [target] -j[threads]`
