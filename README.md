@@ -31,6 +31,7 @@ Compiling the project requires the following commands:
 Where `[target]` is any of:
 - MousePicking
 - Framebuffers
+- Buffers
 
 ## Assets
 To actually run the targets present in this you will need **assets**, reference the [models](models) folder.

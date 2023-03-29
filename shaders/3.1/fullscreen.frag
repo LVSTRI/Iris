@@ -7,5 +7,5 @@ layout (location = 0) out vec4 pixel;
 layout (location = 0) uniform sampler2D attachment;
 
 void main() {
-    pixel = vec4(vec3(texture(attachment, uv)), 1.0);
+    pixel = vec4(texture(attachment, uv).rgb, 1.0);
 }
