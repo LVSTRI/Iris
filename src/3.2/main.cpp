@@ -428,6 +428,7 @@ int main() {
                 j++;
             }
             simple_shader.set(7, { 32_u32 });
+            simple_shader.set(8, { static_cast<iris::uint32>(point_lights.size()) });
 
             u_mesh.draw();
         }

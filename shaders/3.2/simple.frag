@@ -38,7 +38,7 @@ layout (std140, binding = 2) readonly restrict buffer point_light_uniform_t {
 } point_light;
 
 
-vec3 calculate_point_light(point_light_t light, vec3 diffuse_color, vec3 specular_color) {
+vec3 calculate_point_light(point_light_t light, vec3 diffuse_color, vec3 specular_color, vec3 normal) {
     const vec3 ambient_result = light.ambient * diffuse_color;
 
     const vec3 light_dir = normalize(light.position - frag_pos);
@@ -69,7 +69,7 @@ void main() {
 
     vec3 color = diffuse * ambient_factor;
     for (uint i = 0; i < n_point_lights; i++) {
-        color += calculate_point_light(point_light.data[i], diffuse, specular);
+        color += calculate_point_light(point_light.data[i], diffuse, specular, normalize(normal));
     }
 
     pixel = vec4(color, alpha);

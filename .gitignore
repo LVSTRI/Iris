@@ -5,3 +5,5 @@
 models/*
 !models/README.md
 !models/deccer-cubes
+.idea
+.idea/*
