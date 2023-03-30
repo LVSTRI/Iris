@@ -1,7 +1,5 @@
 #version 460 core
 
-#define MAX_POINT_LIGHTS 4
-
 struct material_t {
     sampler2D diffuse;
     sampler2D specular;
@@ -33,10 +31,12 @@ layout (location = 0) out vec4 pixel;
 
 layout (location = 4) uniform vec3 camera_pos;
 layout (location = 5) uniform material_t material;
+layout (location = 8) uniform uint n_point_lights;
 
-layout (std140, binding = 2) uniform point_light_uniform_t {
-    point_light_t[MAX_POINT_LIGHTS] data;
+layout (std140, binding = 2) readonly restrict buffer point_light_uniform_t {
+    point_light_t[] data;
 } point_light;
+
 
 vec3 calculate_point_light(point_light_t light, vec3 diffuse_color, vec3 specular_color) {
     const vec3 ambient_result = light.ambient * diffuse_color;
@@ -68,7 +68,7 @@ void main() {
     const vec3 specular = texture(material.specular, uv).rgb;
 
     vec3 color = diffuse * ambient_factor;
-    for (int i = 0; i < MAX_POINT_LIGHTS; i++) {
+    for (uint i = 0; i < n_point_lights; i++) {
         color += calculate_point_light(point_light.data[i], diffuse, specular);
     }
 

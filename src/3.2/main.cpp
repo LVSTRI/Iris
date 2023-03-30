@@ -13,7 +13,7 @@
 #include <mesh.hpp>
 #include <model.hpp>
 #include <framebuffer.hpp>
-#include <uniform_buffer.hpp>
+#include <buffer.hpp>
 
 #include <debug_break.hpp>
 
@@ -353,10 +353,9 @@ int main() {
     auto last_frame = 0.0f;
 
     // uniform buffers
-    auto camera_uniform = iris::uniform_buffer_t::create(sizeof(glm::mat4[2]));
-    auto model_uniform = iris::uniform_buffer_t::create(sizeof(glm::mat4[256]));
-    auto point_light_uniform = iris::uniform_buffer_t::create(sizeof(point_light_t[4]));
-
+    auto camera_buffer = iris::buffer_t::create(sizeof(glm::mat4[2]), GL_UNIFORM_BUFFER);
+    auto model_buffer = iris::buffer_t::create(sizeof(glm::mat4[1024]), GL_SHADER_STORAGE_BUFFER);
+    auto point_light_buffer = iris::buffer_t::create(sizeof(point_light_t[16]), GL_SHADER_STORAGE_BUFFER);
 
     // render loop
     glEnable(GL_SCISSOR_TEST);
@@ -407,9 +406,9 @@ int main() {
             camera.view(),
         });
 
-        camera_uniform.write(camera_data.data(), iris::size_bytes(camera_data));
-        model_uniform.write(transforms.data(), iris::size_bytes(transforms));
-        point_light_uniform.write(point_lights.data(), iris::size_bytes(point_lights));
+        camera_buffer.write(camera_data.data(), iris::size_bytes(camera_data));
+        model_buffer.write(transforms.data(), iris::size_bytes(transforms));
+        point_light_buffer.write(point_lights.data(), iris::size_bytes(point_lights));
 
         // 1. render the frustum lines
         glScissor(0, 0, window.width, window.height);
@@ -433,7 +432,7 @@ int main() {
                         .set(0, transform)
                         .set(3, { 1.0f, 1.0f, 1.0f });
 
-                    camera_uniform.bind_base(0);
+                    camera_buffer.bind_base(0);
 
                     glBindVertexArray(aabb_vao);
                     glDrawArrays(GL_LINES, 0, 24);
@@ -453,9 +452,9 @@ int main() {
                 .set(0, { mesh.id })
                 .set(4, camera.position());
 
-            camera_uniform.bind_base(0);
-            model_uniform.bind_base(1);
-            point_light_uniform.bind_base(2);
+            camera_buffer.bind_base(0);
+            model_buffer.bind_base(1);
+            point_light_buffer.bind_base(2);
 
             for (auto j = 0_i32; const auto& texture : u_mesh.textures()) {
                 texture.get().bind(j);
@@ -490,9 +489,9 @@ int main() {
                 .set(0, { mesh.id })
                 .set(4, camera.position());
 
-            camera_uniform.bind_base(0);
-            model_uniform.bind_base(1);
-            point_light_uniform.bind_base(2);
+            camera_buffer.bind_base(0);
+            model_buffer.bind_base(1);
+            point_light_buffer.bind_range(2, 0, iris::size_bytes(point_lights));
 
             for (auto j = 0_i32; const auto& texture : u_mesh.textures()) {
                 texture.get().bind(j);
@@ -500,6 +499,7 @@ int main() {
                 j++;
             }
             simple_shader.set(7, { 32_u32 });
+            simple_shader.set(8, { static_cast<iris::uint32>(point_lights.size()) });
 
             u_mesh.draw();
         }
@@ -510,7 +510,7 @@ int main() {
                 .set(0, light_transforms[i])
                 .set(3, point_lights[i].diffuse);
 
-            camera_uniform.bind_base(0);
+            camera_buffer.bind_base(0);
 
             meshes[0].draw();
         }

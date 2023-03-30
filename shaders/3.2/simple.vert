@@ -1,7 +1,5 @@
 #version 460 core
 
-#define MAX_INSTANCES 256
-
 struct transform_data_t {
     mat4 model;
     mat4 t_inv_model;
@@ -20,8 +18,8 @@ layout (std140, binding = 0) uniform camera_uniform_t {
     mat4 view;
 } camera;
 
-layout (std140, binding = 1) uniform transform_uniform_t {
-    transform_data_t[MAX_INSTANCES] data;
+layout (std140, binding = 1) readonly restrict buffer transform_buffer_t {
+    transform_data_t[] data;
 } transform;
 
 layout (location = 0) uniform uint transform_id;

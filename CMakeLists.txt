@@ -49,7 +49,7 @@ add_library(Iris STATIC
     src/model.cpp
     src/framebuffer.hpp
     src/framebuffer.cpp
-    src/debug_break.hpp src/uniform_buffer.hpp src/uniform_buffer.cpp)
+    src/debug_break.hpp src/buffer.hpp src/buffer.cpp)
 
 target_link_libraries(Iris PUBLIC glad glfw stb glm assimp)
 target_include_directories(Iris PUBLIC src)
