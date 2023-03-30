@@ -115,6 +115,8 @@ int main() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    // multisampling
+    glfwWindowHint(GLFW_SAMPLES, 4);
 
     auto terminate_glfw = iris::defer_t([]() {
         glfwTerminate();
@@ -197,7 +199,6 @@ int main() {
     auto camera = iris::camera_t::create(window);
 
     // vertex and fragment shader creation
-    auto screen_shader = iris::shader_t::create("../shaders/3.2/fullscreen.vert", "../shaders/3.2/fullscreen.frag");
     auto simple_shader = iris::shader_t::create("../shaders/3.2/simple.vert", "../shaders/3.2/simple.frag");
     auto light_shader = iris::shader_t::create("../shaders/3.2/light.vert", "../shaders/3.2/light.frag");
     auto line_shader = iris::shader_t::create("../shaders/3.2/line.vert", "../shaders/3.2/line.frag");
@@ -217,9 +218,9 @@ int main() {
     }
 
     auto models = std::vector<iris::model_t>();
-    models.emplace_back(iris::model_t::create("../models/deccer-cubes/SM_Deccer_Cubes_Textured.gltf"));
+    // models.emplace_back(iris::model_t::create("../models/deccer-cubes/SM_Deccer_Cubes_Textured.gltf"));
     // models.emplace_back(iris::model_t::create("../models/San_Miguel/san-miguel.obj"));
-    // models.emplace_back(iris::model_t::create("../models/sponza/Sponza.gltf"));
+    models.emplace_back(iris::model_t::create("../models/sponza/Sponza.gltf"));
     // models.emplace_back(iris::model_t::create("../models/chess/ABeautifulGame.gltf"));
 
     auto transforms = std::vector<std::array<glm::mat4, 2>>();
@@ -314,39 +315,10 @@ int main() {
     glCullFace(GL_BACK);
     glFrontFace(GL_CCW);
 
-    // framebuffers
-    auto attachments = std::vector<iris::framebuffer_attachment_t>();
-    attachments.emplace_back(iris::framebuffer_attachment_t::create(window.width, window.height, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE));
-    attachments.emplace_back(iris::framebuffer_attachment_t::create(window.width, window.height, GL_DEPTH24_STENCIL8, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8));
-
-    auto framebuffer = iris::framebuffer_t::create({ std::cref(attachments[0]), std::cref(attachments[1]) });
-    if (!framebuffer.is_complete()) {
-        std::terminate();
-    }
-
-    // fullscreen quad
-    auto f_quad_data = std::to_array({
-        -1.0f,  1.0f,  0.0f, 1.0f,
-        -1.0f, -1.0f,  0.0f, 0.0f,
-         1.0f, -1.0f,  1.0f, 0.0f,
-
-        -1.0f,  1.0f,  0.0f, 1.0f,
-         1.0f, -1.0f,  1.0f, 0.0f,
-         1.0f,  1.0f,  1.0f, 1.0f
-    });
-    auto f_quad_vao = 0_u32;
-    auto f_quad_vbo = 0_u32;
-    glGenVertexArrays(1, &f_quad_vao);
-    glGenBuffers(1, &f_quad_vbo);
-
-    glBindVertexArray(f_quad_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, f_quad_vbo);
-    glBufferData(GL_ARRAY_BUFFER, iris::size_bytes(f_quad_data), f_quad_data.data(), GL_STATIC_DRAW);
-
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(iris::float32[4]), nullptr);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(iris::float32[4]), reinterpret_cast<void*>(sizeof(iris::float32[2])));
+    // multisampling
+    glEnable(GL_MULTISAMPLE);
+    glEnable(GL_SAMPLE_ALPHA_TO_ONE);
+    glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
 
     // timing
     auto delta_time = 0.0f;
@@ -359,6 +331,7 @@ int main() {
 
     // render loop
     glEnable(GL_SCISSOR_TEST);
+    glEnable(GL_DEPTH_TEST);
     while (!glfwWindowShouldClose(window.handle)) {
         const auto current_time = static_cast<iris::float32>(glfwGetTime());
         delta_time = current_time - last_frame;
@@ -392,14 +365,7 @@ int main() {
 
         if (window.is_resized) {
             window.is_resized = false;
-            attachments[0] = iris::framebuffer_attachment_t::create(window.width, window.height, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
-            attachments[1] = iris::framebuffer_attachment_t::create(window.width, window.height, GL_DEPTH24_STENCIL8, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8);
-
-            framebuffer = iris::framebuffer_t::create({ std::cref(attachments[0]), std::cref(attachments[1]) });
         }
-
-        glEnable(GL_DEPTH_TEST);
-        framebuffer.bind();
 
         auto camera_data = std::to_array({
             camera.projection(),
@@ -514,23 +480,6 @@ int main() {
 
             meshes[0].draw();
         }
-
-        // 3. render to the default framebuffer
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glScissor(0, 0, window.width, window.height);
-        glViewport(0, 0, window.width, window.height);
-        glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-        // 3.1. render the scene
-        glDisable(GL_DEPTH_TEST);
-        screen_shader
-            .bind()
-            .set(0, { 0 });
-        glBindVertexArray(f_quad_vao);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, framebuffer.attachment(0).id());
-        glDrawArrays(GL_TRIANGLES, 0, 6);
 
         glfwSwapBuffers(window.handle);
         glfwPollEvents();
