@@ -219,8 +219,8 @@ int main() {
 
     auto models = std::vector<iris::model_t>();
     // models.emplace_back(iris::model_t::create("../models/deccer-cubes/SM_Deccer_Cubes_Textured.gltf"));
-    // models.emplace_back(iris::model_t::create("../models/San_Miguel/san-miguel.obj"));
-    models.emplace_back(iris::model_t::create("../models/sponza/Sponza.gltf"));
+    models.emplace_back(iris::model_t::create("../models/San_Miguel/san-miguel.obj"));
+    // models.emplace_back(iris::model_t::create("../models/sponza/Sponza.gltf"));
     // models.emplace_back(iris::model_t::create("../models/chess/ABeautifulGame.gltf"));
 
     auto transforms = std::vector<std::array<glm::mat4, 2>>();
@@ -232,9 +232,17 @@ int main() {
 
     auto light_positions = std::vector<glm::vec3>();
     light_positions.emplace_back( 0.0f, 0.5f,  0.0f);
-    light_positions.emplace_back( 5.0f, 2.0f,  0.0f);
-    light_positions.emplace_back(-5.0f, 2.0f,  5.0f);
-    light_positions.emplace_back( 5.0f, 2.0f, -5.0f);
+    light_positions.emplace_back( 3.0f, 0.5f,  0.0f);
+    light_positions.emplace_back( 3.0f, 0.5f,  3.0f);
+    light_positions.emplace_back( 3.0f, 0.5f, -3.0f);
+    light_positions.emplace_back(-3.0f, 2.5f,  3.0f);
+    light_positions.emplace_back(-3.0f, 2.5f, -3.0f);
+    light_positions.emplace_back( 3.0f, 2.5f,  6.0f);
+    light_positions.emplace_back( 6.0f, 0.5f,  6.0f);
+    light_positions.emplace_back( 6.0f, 0.5f, -6.0f);
+    light_positions.emplace_back(-6.0f, 0.5f,  6.0f);
+    light_positions.emplace_back(-6.0f, 0.5f, -6.0f);
+
 
     auto light_transforms = std::vector<glm::mat4>();
     for (auto i = 0; i < light_positions.size(); ++i) {
@@ -245,7 +253,7 @@ int main() {
     }
 
     auto point_lights = std::vector<point_light_t>();
-    for (auto i = 0; i < 4; ++i) {
+    for (auto i = 0; i < light_positions.size(); ++i) {
         const auto color = glm::normalize(0.25f + glm::vec3(
             rand() / static_cast<iris::float32>(RAND_MAX),
             rand() / static_cast<iris::float32>(RAND_MAX),
@@ -326,7 +334,7 @@ int main() {
 
     // uniform buffers
     auto camera_buffer = iris::buffer_t::create(sizeof(camera_data_t), GL_UNIFORM_BUFFER);
-    auto model_buffer = iris::buffer_t::create(sizeof(glm::mat4[1024]), GL_SHADER_STORAGE_BUFFER);
+    auto model_buffer = iris::buffer_t::create(sizeof(glm::mat4[16384]), GL_SHADER_STORAGE_BUFFER);
     auto point_light_buffer = iris::buffer_t::create(sizeof(point_light_t[16]), GL_SHADER_STORAGE_BUFFER);
 
     // raycasting
@@ -374,7 +382,12 @@ int main() {
                 c_x < 0.0 || c_x > window.width ||
                 c_y < 0.0 || c_y > window.height;
             if (!is_oob && glfwGetMouseButton(window.handle, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
-                hit_mesh.clear();
+                struct ray_hit_t {
+                    std::reference_wrapper<const iris::mesh_t> mesh;
+                    iris::uint32 mesh_id = 0;
+                    iris::float32 t = 0;
+                };
+                auto hit_meshes = std::vector<ray_hit_t>();
                 // NDC mouse position
                 const auto ndc_cursor = glm::vec2(
                     (2.0f * c_x) / static_cast<iris::float32>(window.width) - 1.0f,
@@ -391,7 +404,7 @@ int main() {
 
                 // ray construction
                 const auto ray_origin = glm::vec3(world_near);
-                const auto ray_direction = glm::vec3(world_far) - glm::vec3(world_near);
+                const auto ray_direction = glm::normalize(glm::vec3(world_far) - glm::vec3(world_near));
 
                 // step 1. consider only the AABBs that the ray intersects for further processing
                 {
@@ -415,20 +428,28 @@ int main() {
                                 t_max = glm::max(glm::min(t1, t_max), glm::min(t2, t_max));
                             }
                             if (t_max >= 0 && t_min > 0 && t_min <= t_max) {
-                                hit_mesh.emplace_back(std::cref(mesh), mesh_id);
+                                hit_meshes.push_back({
+                                    std::cref(mesh),
+                                    mesh_id,
+                                    t_min
+                                });
                             }
                             mesh_id++;
                         }
                     }
                 }
+                std::sort(hit_meshes.begin(), hit_meshes.end(), [](const auto& a, const auto& b) {
+                    return a.t < b.t;
+                });
 
                 // step 2. do ray-triangle intersection
                 {
-                    for (const auto& mesh : hit_mesh) {
+                    hit_mesh.clear();
+                    for (const auto& mesh : hit_meshes) {
                         if (hit_mesh.size() == 1) {
                             break;
                         }
-                        const auto& [r_mesh, id] = mesh;
+                        const auto& [r_mesh, id, old_t] = mesh;
                         const auto& vertices = r_mesh.get().vertices();
                         const auto& indices = r_mesh.get().indices();
                         for (auto i = 0_u32; i < indices.size(); i += 3) {
@@ -437,14 +458,13 @@ int main() {
                             const auto& v1 = glm::vec3(transforms[id][0] * glm::vec4(vertices[indices[i + 1]].position, 1.0f));
                             const auto& v2 = glm::vec3(transforms[id][0] * glm::vec4(vertices[indices[i + 2]].position, 1.0f));
 
-                            // find edges and normal
+                            // find edges and plane normal
                             const auto v0v1 = v1 - v0;
                             const auto v0v2 = v2 - v0;
                             const auto normal = glm::normalize(glm::cross(v0v1, v0v2));
-                            const auto area = glm::length(normal);
 
                             // check if ray is parallel to triangle
-                            const auto eps = 0.0001f;
+                            const auto eps = 0.001f;
                             const auto n_r_dir = glm::dot(normal, ray_direction);
                             if (std::fabs(n_r_dir) < eps) {
                                 continue;
