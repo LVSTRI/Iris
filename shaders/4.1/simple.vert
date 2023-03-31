@@ -12,10 +12,13 @@ layout (location = 2) in vec2 uv;
 layout (location = 0) out vec3 out_frag_pos;
 layout (location = 1) out vec3 out_normal;
 layout (location = 2) out vec2 out_uv;
+layout (location = 3) out flat vec3 out_camera_pos;
+layout (location = 4) out flat uint out_transform_id;
 
 layout (std140, binding = 0) uniform camera_uniform_t {
     mat4 projection;
     mat4 view;
+    vec3 position;
 } camera;
 
 layout (std140, binding = 1) readonly restrict buffer transform_buffer_t {
@@ -29,6 +32,8 @@ void main() {
     out_frag_pos = vec3(frag_pos);
     out_normal = normalize(mat3(transform.data[transform_id].t_inv_model) * normal);
     out_uv = uv;
+    out_camera_pos = camera.position;
+    out_transform_id = transform_id;
 
     gl_Position = camera.projection * camera.view * frag_pos;
 }

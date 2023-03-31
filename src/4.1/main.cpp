@@ -37,6 +37,7 @@ constexpr auto WINDOW_HEIGHT = 600;
 struct camera_data_t {
     glm::mat4 projection;
     glm::mat4 view;
+    glm::vec3 position;
 };
 
 struct point_light_t {
@@ -102,6 +103,7 @@ struct mesh_ref_t {
 struct scene_t {
     std::vector<mesh_ref_t> opaque_meshes;
     std::vector<mesh_ref_t> transparent_meshes;
+    std::vector<mesh_ref_t> meshes;
 };
 
 int main() {
@@ -116,8 +118,6 @@ int main() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    // multisampling
-    glfwWindowHint(GLFW_SAMPLES, 4);
 
     auto terminate_glfw = iris::defer_t([]() {
         glfwTerminate();
@@ -200,6 +200,7 @@ int main() {
     auto camera = iris::camera_t::create(window);
 
     // vertex and fragment shader creation
+    auto fullscreen_shader = iris::shader_t::create("../shaders/4.1/fullscreen.vert", "../shaders/4.1/fullscreen.frag");
     auto simple_shader = iris::shader_t::create("../shaders/4.1/simple.vert", "../shaders/4.1/simple.frag");
     auto light_shader = iris::shader_t::create("../shaders/4.1/light.vert", "../shaders/4.1/light.frag");
     auto line_shader = iris::shader_t::create("../shaders/4.1/line.vert", "../shaders/4.1/line.frag");
@@ -219,9 +220,9 @@ int main() {
     }
 
     auto models = std::vector<iris::model_t>();
-    models.emplace_back(iris::model_t::create("../models/deccer-cubes/SM_Deccer_Cubes_Textured.gltf"));
+    // models.emplace_back(iris::model_t::create("../models/deccer-cubes/SM_Deccer_Cubes_Textured.gltf"));
     // models.emplace_back(iris::model_t::create("../models/San_Miguel/san-miguel.obj"));
-    // models.emplace_back(iris::model_t::create("../models/sponza/Sponza.gltf"));
+    models.emplace_back(iris::model_t::create("../models/sponza/Sponza.gltf"));
     // models.emplace_back(iris::model_t::create("../models/chess/ABeautifulGame.gltf"));
 
     auto transforms = std::vector<std::array<glm::mat4, 2>>();
@@ -325,9 +326,68 @@ int main() {
     glFrontFace(GL_CCW);
 
     // multisampling
-    glEnable(GL_MULTISAMPLE);
     glEnable(GL_SAMPLE_ALPHA_TO_ONE);
     glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+
+    // mouse picking
+    auto f0_main_attachments = std::to_array({
+        iris::framebuffer_attachment_t::create(
+            window.width,
+            window.height,
+            GL_RGBA8,
+            GL_RGBA,
+            GL_UNSIGNED_BYTE),
+        iris::framebuffer_attachment_t::create(
+            window.width,
+            window.height,
+            GL_R32UI,
+            GL_RED_INTEGER,
+            GL_UNSIGNED_INT),
+        iris::framebuffer_attachment_t::create(
+            window.width,
+            window.height,
+            GL_DEPTH24_STENCIL8,
+            GL_DEPTH_STENCIL,
+            GL_UNSIGNED_INT_24_8),
+    });
+
+    auto f0_main = iris::framebuffer_t::create({
+        std::cref(f0_main_attachments[0]),
+        std::cref(f0_main_attachments[1]),
+        std::cref(f0_main_attachments[2]),
+    });
+    {
+        const auto draw_attachments = std::to_array<GLenum>({
+            GL_COLOR_ATTACHMENT0,
+            GL_COLOR_ATTACHMENT1
+        });
+        glDrawBuffers(2, draw_attachments.data());
+        glReadBuffer(GL_COLOR_ATTACHMENT1);
+    }
+
+    // fullscreen quad
+    auto f_quad_data = std::to_array({
+        -1.0f,  1.0f,  0.0f, 1.0f,
+        -1.0f, -1.0f,  0.0f, 0.0f,
+         1.0f, -1.0f,  1.0f, 0.0f,
+
+        -1.0f,  1.0f,  0.0f, 1.0f,
+         1.0f, -1.0f,  1.0f, 0.0f,
+         1.0f,  1.0f,  1.0f, 1.0f
+    });
+    auto f_quad_vao = 0_u32;
+    auto f_quad_vbo = 0_u32;
+    glGenVertexArrays(1, &f_quad_vao);
+    glGenBuffers(1, &f_quad_vbo);
+
+    glBindVertexArray(f_quad_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, f_quad_vbo);
+    glBufferData(GL_ARRAY_BUFFER, iris::size_bytes(f_quad_data), f_quad_data.data(), GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(iris::float32[4]), nullptr);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(iris::float32[4]), reinterpret_cast<void*>(sizeof(iris::float32[2])));
 
     // timing
     auto delta_time = 0.0f;
@@ -343,7 +403,6 @@ int main() {
 
     // render loop
     glEnable(GL_SCISSOR_TEST);
-    glEnable(GL_DEPTH_TEST);
     while (!glfwWindowShouldClose(window.handle)) {
         const auto current_time = static_cast<iris::float32>(glfwGetTime());
         delta_time = current_time - last_frame;
@@ -370,175 +429,70 @@ int main() {
                     } else {
                         scene.transparent_meshes.push_back({ std::cref(mesh), mesh_id });
                     }
+                    scene.meshes.push_back({ std::cref(mesh), mesh_id });
                     mesh_id++;
                 }
             }
         }
 
-        if (window.is_focused) {
-            auto c_x = 0.0;
-            auto c_y = 0.0;
-            glfwGetCursorPos(window.handle, &c_x, &c_y);
-            const auto is_oob =
-                c_x < 0.0 || c_x > window.width ||
-                c_y < 0.0 || c_y > window.height;
-            if (!is_oob && glfwGetMouseButton(window.handle, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
-                struct ray_hit_t {
-                    std::reference_wrapper<const iris::mesh_t> mesh;
-                    iris::uint32 mesh_id = 0;
-                    iris::float32 t = 0;
-                };
-                auto hit_meshes = std::vector<ray_hit_t>();
-                // NDC mouse position
-                const auto ndc_cursor = glm::vec2(
-                    (2.0f * c_x) / static_cast<iris::float32>(window.width) - 1.0f,
-                    1.0f - (2.0f * c_y) / static_cast<iris::float32>(window.height));
-                const auto projection = camera.projection();
-                const auto view = camera.view();
-                // NDC -> world space
-                const auto ndc_near = glm::vec4(ndc_cursor, -1.0f, 1.0f);
-                const auto ndc_far = glm::vec4(ndc_cursor, 1.0f, 1.0f);
-                auto world_near = glm::inverse(projection * view) * ndc_near;
-                auto world_far = glm::inverse(projection * view) * ndc_far;
-                world_near /= world_near.w;
-                world_far /= world_far.w;
-
-                // ray construction
-                const auto ray_origin = glm::vec3(world_near);
-                const auto ray_direction = glm::normalize(glm::vec3(world_far) - glm::vec3(world_near));
-
-                // step 1. consider only the AABBs that the ray intersects for further processing
-                {
-                    auto mesh_id = 0_u32;
-                    for (const auto& model : models) {
-                        for (const auto& mesh : model.meshes()) {
-                            // transform the aabb extents to world space
-                            const auto& aabb = mesh.aabb();
-                            const auto world_aabb_min = transforms[mesh_id][0] * glm::vec4(aabb.min, 1.0f);
-                            const auto world_aabb_max = transforms[mesh_id][0] * glm::vec4(aabb.max, 1.0f);
-
-                            auto t_min = 0.0f;
-                            auto t_max = std::numeric_limits<iris::float32>::infinity();
-                            for (auto i = 0_i32; i < 3; ++i) {
-                                // intersect
-                                const auto inv_dir = 1 / ray_direction[i];
-                                const auto t1 = (world_aabb_min[i] - ray_origin[i]) * inv_dir;
-                                const auto t2 = (world_aabb_max[i] - ray_origin[i]) * inv_dir;
-
-                                t_min = glm::min(glm::max(t1, t_min), glm::max(t2, t_min));
-                                t_max = glm::max(glm::min(t1, t_max), glm::min(t2, t_max));
-                            }
-                            if (t_max >= 0 && t_min > 0 && t_min <= t_max) {
-                                hit_meshes.push_back({
-                                    std::cref(mesh),
-                                    mesh_id,
-                                    t_min
-                                });
-                            }
-                            mesh_id++;
-                        }
-                    }
-                }
-                std::sort(hit_meshes.begin(), hit_meshes.end(), [](const auto& a, const auto& b) {
-                    return a.t < b.t;
-                });
-
-                // step 2. do ray-triangle intersection
-                {
-                    hit_mesh = std::nullopt;
-                    for (const auto& mesh : hit_meshes) {
-                        if (hit_mesh) {
-                            break;
-                        }
-                        const auto& [r_mesh, id, _] = mesh;
-                        const auto& vertices = r_mesh.get().vertices();
-                        const auto& indices = r_mesh.get().indices();
-                        for (auto i = 0_u32; i < indices.size(); i += 3) {
-                            // get triangle vertices
-                            const auto& v0 = glm::vec3(transforms[id][0] * glm::vec4(vertices[indices[i + 0]].position, 1.0f));
-                            const auto& v1 = glm::vec3(transforms[id][0] * glm::vec4(vertices[indices[i + 1]].position, 1.0f));
-                            const auto& v2 = glm::vec3(transforms[id][0] * glm::vec4(vertices[indices[i + 2]].position, 1.0f));
-
-                            // find edges and plane normal
-                            const auto v0v1 = v1 - v0;
-                            const auto v0v2 = v2 - v0;
-                            const auto normal = glm::normalize(glm::cross(v0v1, v0v2));
-
-                            // check if ray is parallel to triangle
-                            const auto eps = 0.001f;
-                            const auto n_r_dir = glm::dot(normal, ray_direction);
-                            if (std::fabs(n_r_dir) < eps) {
-                                continue;
-                            }
-
-                            // check if the triangle is behind the ray
-                            const auto d = -glm::dot(normal, v0);
-                            const auto t = -(glm::dot(normal, ray_origin) + d) / n_r_dir;
-                            if (t < 0) {
-                                continue;
-                            }
-
-                            // intersection point
-                            const auto p = ray_origin + t * ray_direction;
-
-                            // check if P is inside the triangle
-                            // edge 0
-                            {
-                                const auto edge0 = v1 - v0;
-                                const auto vp0 = p - v0;
-                                const auto c = glm::cross(edge0, vp0);
-                                if (glm::dot(normal, c) < 0) {
-                                    continue;
-                                }
-                            }
-
-                            // edge 1
-                            {
-                                const auto edge1 = v2 - v1;
-                                const auto vp1 = p - v1;
-                                const auto c = glm::cross(edge1, vp1);
-                                if (glm::dot(normal, c) < 0) {
-                                    continue;
-                                }
-                            }
-
-                            // edge 2
-                            {
-                                const auto edge2 = v0 - v2;
-                                const auto vp2 = p - v2;
-                                const auto c = glm::cross(edge2, vp2);
-                                if (glm::dot(normal, c) < 0) {
-                                    continue;
-                                }
-                            }
-
-                            // finally the ray intersects the triangle
-                            hit_mesh = std::make_pair(r_mesh, id);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
         if (window.is_resized) {
+            f0_main_attachments = std::to_array({
+                iris::framebuffer_attachment_t::create(
+                    window.width,
+                    window.height,
+                    GL_RGBA8,
+                    GL_RGBA,
+                    GL_UNSIGNED_BYTE),
+                iris::framebuffer_attachment_t::create(
+                    window.width,
+                    window.height,
+                    GL_R32UI,
+                    GL_RED_INTEGER,
+                    GL_UNSIGNED_INT),
+                iris::framebuffer_attachment_t::create(
+                    window.width,
+                    window.height,
+                    GL_DEPTH24_STENCIL8,
+                    GL_DEPTH_STENCIL,
+                    GL_UNSIGNED_INT_24_8),
+            });
+
+            f0_main = iris::framebuffer_t::create({
+                std::cref(f0_main_attachments[0]),
+                std::cref(f0_main_attachments[1]),
+                std::cref(f0_main_attachments[2]),
+            });
+
+            const auto draw_attachments = std::to_array<GLenum>({
+                GL_COLOR_ATTACHMENT0,
+                GL_COLOR_ATTACHMENT1
+            });
+            glDrawBuffers(2, draw_attachments.data());
+            glReadBuffer(GL_COLOR_ATTACHMENT1);
             window.is_resized = false;
         }
 
-        auto camera_data = std::to_array({
+        auto camera_data = camera_data_t {
             camera.projection(),
             camera.view(),
-        });
+            camera.position()
+        };
 
-        camera_buffer.write(camera_data.data(), iris::size_bytes(camera_data));
+        camera_buffer.write(&camera_data, iris::size_bytes(camera_data));
         model_buffer.write(transforms.data(), iris::size_bytes(transforms));
         point_light_buffer.write(point_lights.data(), iris::size_bytes(point_lights));
 
         // 1. render the frustum lines
+        f0_main.bind();
+        glEnable(GL_DEPTH_TEST);
         glScissor(0, 0, window.width, window.height);
         glViewport(0, 0, window.width, window.height);
-        glClearColor(0.05f, 0.05f, 0.05f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        const auto clear_color = glm::vec4(0.05f, 0.05f, 0.05f, 1.0f);
+        const auto clear_id = glm::uvec4(0xffffffff);
+        const auto clear_depth = glm::vec4(1.0f);
+        glClearBufferfv(GL_COLOR, 0, glm::value_ptr(clear_color));
+        glClearBufferuiv(GL_COLOR, 1, glm::value_ptr(clear_id));
+        glClearBufferfv(GL_DEPTH, 0, glm::value_ptr(clear_depth));
 
         // debug AABBs
         if (glfwGetKey(window.handle, GLFW_KEY_F) == GLFW_PRESS) {
@@ -573,8 +527,7 @@ int main() {
 
             simple_shader
                 .bind()
-                .set(0, { mesh.id })
-                .set(4, camera.position());
+                .set(0, { mesh.id });
 
             camera_buffer.bind_base(0);
             model_buffer.bind_range(1, 0, iris::size_bytes(transforms));
@@ -582,11 +535,11 @@ int main() {
 
             for (auto j = 0_i32; const auto& texture : u_mesh.textures()) {
                 texture.get().bind(j);
-                simple_shader.set(5 + j, { j });
+                simple_shader.set(4 + j, { j });
                 j++;
             }
-            simple_shader.set(7, { 32_u32 });
-            simple_shader.set(8, { static_cast<iris::uint32>(point_lights.size()) });
+            simple_shader.set(6, { 32_u32 });
+            simple_shader.set(7, { static_cast<iris::uint32>(point_lights.size()) });
 
             u_mesh.draw();
         }
@@ -611,8 +564,7 @@ int main() {
 
             simple_shader
                 .bind()
-                .set(0, { mesh.id })
-                .set(4, camera.position());
+                .set(0, { mesh.id });
 
             camera_buffer.bind_base(0);
             model_buffer.bind_range(1, 0, iris::size_bytes(transforms));
@@ -620,11 +572,11 @@ int main() {
 
             for (auto j = 0_i32; const auto& texture : u_mesh.textures()) {
                 texture.get().bind(j);
-                simple_shader.set(5 + j, { j });
+                simple_shader.set(4 + j, { j });
                 j++;
             }
-            simple_shader.set(7, { 32_u32 });
-            simple_shader.set(8, { static_cast<iris::uint32>(point_lights.size()) });
+            simple_shader.set(6, { 32_u32 });
+            simple_shader.set(7, { static_cast<iris::uint32>(point_lights.size()) });
 
             u_mesh.draw();
         }
@@ -659,6 +611,39 @@ int main() {
             glBindVertexArray(aabb_vao);
             glDrawArrays(GL_LINES, 0, 24);
         }
+
+        // read the mesh_id buffer if anything was clicked
+        if (window.is_focused) {
+            auto c_x = 0.0;
+            auto c_y = 0.0;
+            glfwGetCursorPos(window.handle, &c_x, &c_y);
+            const auto is_oob =
+                c_x < 0.0 || c_x > window.width ||
+                c_y < 0.0 || c_y > window.height;
+            if (!is_oob && glfwGetMouseButton(window.handle, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
+                auto mesh_id = -1_u32;
+                glReadPixels(c_x, window.height - c_y, 1, 1, GL_RED_INTEGER, GL_UNSIGNED_INT, &mesh_id);
+                if (mesh_id != -1 && mesh_id < scene.meshes.size()) {
+                    hit_mesh = {
+                        std::ref(scene.meshes[mesh_id].ref.get()),
+                        mesh_id
+                    };
+                }
+            }
+        }
+
+        // render to default framebuffer
+        fullscreen_shader.bind();
+        glDisable(GL_DEPTH_TEST);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, window.width, window.height);
+        glScissor(0, 0, window.width, window.height);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        glBindVertexArray(f_quad_vao);
+        glBindTexture(GL_TEXTURE_2D, f0_main.attachment(0).id());
+        fullscreen_shader.set(0, { 0_i32 });
+        glDrawArrays(GL_TRIANGLES, 0, 6);
 
         glfwSwapBuffers(window.handle);
         glfwPollEvents();

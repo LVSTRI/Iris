@@ -26,12 +26,14 @@ struct point_light_t {
 layout (location = 0) in vec3 frag_pos;
 layout (location = 1) in vec3 normal;
 layout (location = 2) in vec2 uv;
+layout (location = 3) in flat vec3 camera_pos;
+layout (location = 4) in flat uint transform_id;
 
-layout (location = 0) out vec4 pixel;
+layout (location = 0) out vec4 out_pixel;
+layout (location = 1) out uint out_transform_id;
 
-layout (location = 4) uniform vec3 camera_pos;
-layout (location = 5) uniform material_t material;
-layout (location = 8) uniform uint n_point_lights;
+layout (location = 4) uniform material_t material;
+layout (location = 7) uniform uint n_point_lights;
 
 layout (std140, binding = 2) readonly restrict buffer point_light_uniform_t {
     point_light_t[] data;
@@ -72,5 +74,6 @@ void main() {
         color += calculate_point_light(point_light.data[i], diffuse, specular, normalize(normal));
     }
 
-    pixel = vec4(color, alpha);
+    out_pixel = vec4(color, alpha);
+    out_transform_id = transform_id;
 }
