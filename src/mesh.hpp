@@ -34,8 +34,8 @@ namespace iris {
         mesh_t(self&& other) noexcept;
         auto operator =(self&& other) noexcept -> self&;
 
-        static auto create(std::span<const vertex_t> vertices,
-                           std::span<const uint32> indices,
+        static auto create(std::vector<vertex_t> vertices,
+                           std::vector<uint32> indices,
                            std::vector<std::reference_wrapper<const texture_t>> textures,
                            glm::mat4 transform = glm::mat4(1.0f)) noexcept -> self;
 
@@ -45,8 +45,8 @@ namespace iris {
         auto transform() const noexcept -> const glm::mat4&;
         auto aabb() const noexcept -> const aabb_t&;
         auto textures() const noexcept -> std::span<const std::reference_wrapper<const texture_t>>;
-        auto vertices() const noexcept -> uint32;
-        auto indices() const noexcept -> uint32;
+        auto vertices() const noexcept -> std::span<const vertex_t>;
+        auto indices() const noexcept -> std::span<const uint32>;
 
         auto draw() const noexcept -> void;
 
@@ -61,8 +61,7 @@ namespace iris {
         aabb_t _aabb = {};
 
         std::vector<std::reference_wrapper<const texture_t>> _textures;
-
-        uint32 _vertices = 0;
-        uint32 _indices = 0;
+        std::vector<vertex_t> _vertices;
+        std::vector<uint32> _indices;
     };
 } // namespace iris

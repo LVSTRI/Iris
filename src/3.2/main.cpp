@@ -53,7 +53,7 @@ struct point_light_t {
 };
 
 static auto generate_cube() noexcept {
-    return std::to_array<iris::vertex_t>({
+    return std::vector<iris::vertex_t>({
         { { -0.5f, -0.5f, -0.5f }, {  0.0f, 0.0f, -1.0f }, { 0.0f, 0.0f } },
         { {  0.5f, -0.5f, -0.5f }, {  0.0f, 0.0f, -1.0f }, { 1.0f, 0.0f } },
         { {  0.5f,  0.5f, -0.5f }, {  0.0f, 0.0f, -1.0f }, { 1.0f, 1.0f } },
@@ -231,13 +231,13 @@ int main() {
     }
 
     auto light_positions = std::vector<glm::vec3>();
-    light_positions.emplace_back(-3.0f, 0.0f, 0.0f);
-    light_positions.emplace_back(0.0f, 6.0f, 3.0f);
-    light_positions.emplace_back(0.0f, 1.0f, -3.0f);
-    light_positions.emplace_back(3.0f, 3.0f, 3.0f);
+    light_positions.emplace_back( 0.0f, 0.5f,  0.0f);
+    light_positions.emplace_back( 5.0f, 2.0f,  0.0f);
+    light_positions.emplace_back(-5.0f, 2.0f,  5.0f);
+    light_positions.emplace_back( 5.0f, 2.0f, -5.0f);
 
     auto light_transforms = std::vector<glm::mat4>();
-    for (auto i = 0; i < 4; ++i) {
+    for (auto i = 0; i < light_positions.size(); ++i) {
         auto transform = glm::identity<glm::mat4>();
         transform = glm::translate(transform, light_positions[i]);
         transform = glm::scale(transform, glm::vec3(0.1f));
@@ -246,10 +246,10 @@ int main() {
 
     auto point_lights = std::vector<point_light_t>();
     for (auto i = 0; i < 4; ++i) {
-        const auto color = 0.75f + glm::vec3(
-            rand() / static_cast<iris::float32>(RAND_MAX) * 0.25f,
-            rand() / static_cast<iris::float32>(RAND_MAX) * 0.25f,
-            rand() / static_cast<iris::float32>(RAND_MAX) * 0.25f);
+        const auto color = glm::normalize(0.25f + glm::vec3(
+            rand() / static_cast<iris::float32>(RAND_MAX),
+            rand() / static_cast<iris::float32>(RAND_MAX),
+            rand() / static_cast<iris::float32>(RAND_MAX)));
         point_lights.emplace_back(point_light_t{
             .position = light_positions[i],
             .ambient = glm::vec3(0.1f),
@@ -325,9 +325,12 @@ int main() {
     auto last_frame = 0.0f;
 
     // uniform buffers
-    auto camera_buffer = iris::buffer_t::create(sizeof(glm::mat4[2]), GL_UNIFORM_BUFFER);
+    auto camera_buffer = iris::buffer_t::create(sizeof(camera_data_t), GL_UNIFORM_BUFFER);
     auto model_buffer = iris::buffer_t::create(sizeof(glm::mat4[1024]), GL_SHADER_STORAGE_BUFFER);
     auto point_light_buffer = iris::buffer_t::create(sizeof(point_light_t[16]), GL_SHADER_STORAGE_BUFFER);
+
+    // raycasting
+    auto hit_mesh = std::vector<std::pair<std::reference_wrapper<const iris::mesh_t>, iris::uint32>>();
 
     // render loop
     glEnable(GL_SCISSOR_TEST);
@@ -359,6 +362,141 @@ int main() {
                         scene.transparent_meshes.push_back({ std::cref(mesh), mesh_id });
                     }
                     mesh_id++;
+                }
+            }
+        }
+
+        if (!window.is_mouse_captured && window.is_focused) {
+            auto c_x = 0.0;
+            auto c_y = 0.0;
+            glfwGetCursorPos(window.handle, &c_x, &c_y);
+            const auto is_oob =
+                c_x < 0.0 || c_x > window.width ||
+                c_y < 0.0 || c_y > window.height;
+            if (!is_oob && glfwGetMouseButton(window.handle, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
+                hit_mesh.clear();
+                // NDC mouse position
+                const auto ndc_cursor = glm::vec2(
+                    (2.0f * c_x) / static_cast<iris::float32>(window.width) - 1.0f,
+                    1.0f - (2.0f * c_y) / static_cast<iris::float32>(window.height));
+                const auto projection = camera.projection();
+                const auto view = camera.view();
+                // NDC -> world space
+                const auto ndc_near = glm::vec4(ndc_cursor, -1.0f, 1.0f);
+                const auto ndc_far = glm::vec4(ndc_cursor, 1.0f, 1.0f);
+                auto world_near = glm::inverse(projection * view) * ndc_near;
+                auto world_far = glm::inverse(projection * view) * ndc_far;
+                world_near /= world_near.w;
+                world_far /= world_far.w;
+
+                // ray construction
+                const auto ray_origin = glm::vec3(world_near);
+                const auto ray_direction = glm::vec3(world_far) - glm::vec3(world_near);
+
+                // step 1. consider only the AABBs that the ray intersects for further processing
+                {
+                    auto mesh_id = 0_u32;
+                    for (const auto& model : models) {
+                        for (const auto& mesh : model.meshes()) {
+                            // transform the aabb extents to world space
+                            const auto& aabb = mesh.aabb();
+                            const auto world_aabb_min = transforms[mesh_id][0] * glm::vec4(aabb.min, 1.0f);
+                            const auto world_aabb_max = transforms[mesh_id][0] * glm::vec4(aabb.max, 1.0f);
+
+                            auto t_min = 0.0f;
+                            auto t_max = std::numeric_limits<iris::float32>::infinity();
+                            for (auto i = 0_i32; i < 3; ++i) {
+                                // intersect
+                                const auto inv_dir = 1 / ray_direction[i];
+                                const auto t1 = (world_aabb_min[i] - ray_origin[i]) * inv_dir;
+                                const auto t2 = (world_aabb_max[i] - ray_origin[i]) * inv_dir;
+
+                                t_min = glm::min(glm::max(t1, t_min), glm::max(t2, t_min));
+                                t_max = glm::max(glm::min(t1, t_max), glm::min(t2, t_max));
+                            }
+                            if (t_max >= 0 && t_min > 0 && t_min <= t_max) {
+                                hit_mesh.emplace_back(std::cref(mesh), mesh_id);
+                            }
+                            mesh_id++;
+                        }
+                    }
+                }
+
+                // step 2. do ray-triangle intersection
+                {
+                    for (const auto& mesh : hit_mesh) {
+                        if (hit_mesh.size() == 1) {
+                            break;
+                        }
+                        const auto& [r_mesh, id] = mesh;
+                        const auto& vertices = r_mesh.get().vertices();
+                        const auto& indices = r_mesh.get().indices();
+                        for (auto i = 0_u32; i < indices.size(); i += 3) {
+                            // get triangle vertices
+                            const auto& v0 = glm::vec3(transforms[id][0] * glm::vec4(vertices[indices[i + 0]].position, 1.0f));
+                            const auto& v1 = glm::vec3(transforms[id][0] * glm::vec4(vertices[indices[i + 1]].position, 1.0f));
+                            const auto& v2 = glm::vec3(transforms[id][0] * glm::vec4(vertices[indices[i + 2]].position, 1.0f));
+
+                            // find edges and normal
+                            const auto v0v1 = v1 - v0;
+                            const auto v0v2 = v2 - v0;
+                            const auto normal = glm::normalize(glm::cross(v0v1, v0v2));
+                            const auto area = glm::length(normal);
+
+                            // check if ray is parallel to triangle
+                            const auto eps = 0.0001f;
+                            const auto n_r_dir = glm::dot(normal, ray_direction);
+                            if (std::fabs(n_r_dir) < eps) {
+                                continue;
+                            }
+
+                            // check if the triangle is behind the ray
+                            const auto d = -glm::dot(normal, v0);
+                            const auto t = -(glm::dot(normal, ray_origin) + d) / n_r_dir;
+                            if (t < 0) {
+                                continue;
+                            }
+
+                            // intersection point
+                            const auto p = ray_origin + t * ray_direction;
+
+                            // check if P is inside the triangle
+                            // edge 0
+                            {
+                                const auto edge0 = v1 - v0;
+                                const auto vp0 = p - v0;
+                                const auto c = glm::cross(edge0, vp0);
+                                if (glm::dot(normal, c) < 0) {
+                                    continue;
+                                }
+                            }
+
+                            // edge 1
+                            {
+                                const auto edge1 = v2 - v1;
+                                const auto vp1 = p - v1;
+                                const auto c = glm::cross(edge1, vp1);
+                                if (glm::dot(normal, c) < 0) {
+                                    continue;
+                                }
+                            }
+
+                            // edge 2
+                            {
+                                const auto edge2 = v0 - v2;
+                                const auto vp2 = p - v2;
+                                const auto c = glm::cross(edge2, vp2);
+                                if (glm::dot(normal, c) < 0) {
+                                    continue;
+                                }
+                            }
+
+                            // finally the ray intersects the triangle
+                            hit_mesh.clear();
+                            hit_mesh.emplace_back(r_mesh, id);
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -419,8 +557,8 @@ int main() {
                 .set(4, camera.position());
 
             camera_buffer.bind_base(0);
-            model_buffer.bind_base(1);
-            point_light_buffer.bind_base(2);
+            model_buffer.bind_range(1, 0, iris::size_bytes(transforms));
+            point_light_buffer.bind_range(2, 0, iris::size_bytes(point_lights));
 
             for (auto j = 0_i32; const auto& texture : u_mesh.textures()) {
                 texture.get().bind(j);
@@ -457,7 +595,7 @@ int main() {
                 .set(4, camera.position());
 
             camera_buffer.bind_base(0);
-            model_buffer.bind_base(1);
+            model_buffer.bind_range(1, 0, iris::size_bytes(transforms));
             point_light_buffer.bind_range(2, 0, iris::size_bytes(point_lights));
 
             for (auto j = 0_i32; const auto& texture : u_mesh.textures()) {
@@ -471,7 +609,7 @@ int main() {
             u_mesh.draw();
         }
 
-        for (auto i = 0_u32; i < 4; ++i) {
+        for (auto i = 0_u32; i < light_positions.size(); ++i) {
             light_shader
                 .bind()
                 .set(0, light_transforms[i])
@@ -480,6 +618,26 @@ int main() {
             camera_buffer.bind_base(0);
 
             meshes[0].draw();
+        }
+
+        // highlight the hit object (if any)
+        if (hit_mesh.size() == 1){
+            const auto& [r_mesh, id] = hit_mesh[0];
+            const auto& aabb = r_mesh.get().aabb();
+            auto transform = glm::identity<glm::mat4>();
+            transform = glm::translate(transform, aabb.center);
+            transform = glm::scale(transform, aabb.size / 2.0f);
+            transform = transforms[id][0] * transform;
+
+            line_shader
+                .bind()
+                .set(0, transform)
+                .set(3, { 1.0f, 1.0f, 1.0f });
+
+            camera_buffer.bind_base(0);
+
+            glBindVertexArray(aabb_vao);
+            glDrawArrays(GL_LINES, 0, 24);
         }
 
         glfwSwapBuffers(window.handle);

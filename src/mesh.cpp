@@ -24,8 +24,8 @@ namespace iris {
         return *this;
     }
 
-    auto mesh_t::create(std::span<const vertex_t> vertices,
-                        std::span<const uint32> indices,
+    auto mesh_t::create(std::vector<vertex_t> vertices,
+                        std::vector<uint32> indices,
                         std::vector<std::reference_wrapper<const texture_t>> textures,
                         glm::mat4 transform) noexcept -> self {
         auto mesh = self();
@@ -37,17 +37,14 @@ namespace iris {
         auto indices_count = indices.size();
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh._ebo);
         if (indices.empty()) {
-            indices_count = vertices.size();
-            auto g_indices = std::vector<uint32>(vertices.size());
-            std::iota(g_indices.begin(), g_indices.end(), 0_u32);
-            glBufferData(GL_ELEMENT_ARRAY_BUFFER, size_bytes(g_indices), g_indices.data(), GL_STATIC_DRAW);
-        } else {
-            glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size_bytes(), indices.data(), GL_STATIC_DRAW);
+            indices.resize(vertices.size());
+            std::iota(indices.begin(), indices.end(), 0);
         }
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, size_bytes(indices), indices.data(), GL_STATIC_DRAW);
 
         glBindVertexArray(mesh._vao);
         glBindBuffer(GL_ARRAY_BUFFER, mesh._vbo);
-        glBufferData(GL_ARRAY_BUFFER, vertices.size_bytes(), vertices.data(), GL_STATIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, size_bytes(vertices), vertices.data(), GL_STATIC_DRAW);
 
         glEnableVertexAttribArray(0);
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex_t), (void*)offsetof(vertex_t, position));
@@ -57,8 +54,6 @@ namespace iris {
 
         glEnableVertexAttribArray(2);
         glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(vertex_t), (void*)offsetof(vertex_t, uv));
-
-        mesh._textures = std::move(textures);
 
         mesh._transform = transform;
 
@@ -73,8 +68,9 @@ namespace iris {
         aabb.size = aabb.max - aabb.min;
         mesh._aabb = aabb;
 
-        mesh._vertices = vertices.size();
-        mesh._indices = indices_count;
+        mesh._textures = std::move(textures);
+        mesh._vertices = std::move(vertices);
+        mesh._indices = std::move(indices);
 
         return mesh;
     }
@@ -103,18 +99,18 @@ namespace iris {
         return _textures;
     }
 
-    auto mesh_t::vertices() const noexcept -> uint32 {
+    auto mesh_t::vertices() const noexcept -> std::span<const vertex_t> {
         return _vertices;
     }
 
-    auto mesh_t::indices() const noexcept -> uint32 {
+    auto mesh_t::indices() const noexcept -> std::span<const uint32> {
         return _indices;
     }
 
     auto mesh_t::draw() const noexcept -> void {
         glBindVertexArray(_vao);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ebo);
-        glDrawElements(GL_TRIANGLES, _indices, GL_UNSIGNED_INT, nullptr);
+        glDrawElements(GL_TRIANGLES, _indices.size(), GL_UNSIGNED_INT, nullptr);
     }
 
     auto mesh_t::swap(self& other) noexcept -> void {
