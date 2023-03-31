@@ -49,7 +49,9 @@ add_library(Iris STATIC
     src/model.cpp
     src/framebuffer.hpp
     src/framebuffer.cpp
-    src/debug_break.hpp src/buffer.hpp src/buffer.cpp)
+    src/debug_break.hpp
+    src/buffer.hpp
+    src/buffer.cpp)
 
 target_link_libraries(Iris PUBLIC glad glfw stb glm assimp)
 target_include_directories(Iris PUBLIC src)
@@ -62,3 +64,6 @@ target_link_libraries(Framebuffers PUBLIC Iris)
 
 add_executable(Buffers src/3.2/main.cpp)
 target_link_libraries(Buffers PUBLIC Iris)
+
+add_executable(AdvancedLighting src/4.1/main.cpp)
+target_link_libraries(AdvancedLighting PUBLIC Iris)

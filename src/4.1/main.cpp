@@ -200,9 +200,9 @@ int main() {
     auto camera = iris::camera_t::create(window);
 
     // vertex and fragment shader creation
-    auto simple_shader = iris::shader_t::create("../shaders/3.2/simple.vert", "../shaders/3.2/simple.frag");
-    auto light_shader = iris::shader_t::create("../shaders/3.2/light.vert", "../shaders/3.2/light.frag");
-    auto line_shader = iris::shader_t::create("../shaders/3.2/line.vert", "../shaders/3.2/line.frag");
+    auto simple_shader = iris::shader_t::create("../shaders/4.1/simple.vert", "../shaders/4.1/simple.frag");
+    auto light_shader = iris::shader_t::create("../shaders/4.1/light.vert", "../shaders/4.1/light.frag");
+    auto line_shader = iris::shader_t::create("../shaders/4.1/line.vert", "../shaders/4.1/line.frag");
 
     // texture loading
     auto textures = std::vector<iris::texture_t>();

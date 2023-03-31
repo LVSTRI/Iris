@@ -20,11 +20,11 @@ The keybindings are as follows:
 To build this project you will need [CMake](https://cmake.org/) and a C++ compiler. Futhermore you will need to install
 [Python](https://www.python.org/) and [Pip](https://pypi.org/project/pip/) to install dependencies (`jinja2`).
 
-Installing `jinja2` requires `pip install jinja2` in your terminal;
 Compiling the project requires the following commands:
 - `git clone --recursive [This Repo]`
 - `cd [This Repo]`
 - `mkdir build && cd build`
+- `pip install jinja2`
 - `cmake .. -G [Your Favourite Generator]`
 - `cmake --build . --target [target] -j[threads]`
 
@@ -32,6 +32,7 @@ Where `[target]` is any of:
 - MousePicking
 - Framebuffers
 - Buffers
+- AdvancedLighting
 
 ## Assets
 To actually run the targets present in this you will need **assets**, reference the [models](models) folder.
