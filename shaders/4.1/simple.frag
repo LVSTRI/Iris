@@ -48,8 +48,8 @@ vec3 calculate_point_light(point_light_t light, vec3 diffuse_color, vec3 specula
     const vec3 diffuse_result = light.diffuse * diffuse_intensity * diffuse_color;
 
     const vec3 view_dir = normalize(camera_pos - frag_pos);
-    const vec3 light_dir_reflect = reflect(-light_dir, normal);
-    const float specular_intensity = pow(max(dot(view_dir, light_dir_reflect), 0.0), material.shininess);
+    const vec3 halfway = normalize(light_dir + view_dir);
+    const float specular_intensity = pow(max(dot(normal, halfway), 0.0), material.shininess);
     const vec3 specular_result = light.specular * specular_intensity * specular_color;
 
     const float f_dist = length(light.position - frag_pos);
