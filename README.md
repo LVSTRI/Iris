@@ -9,6 +9,7 @@ You should be able to compile & run this under *most* Windows or Linux machines 
 The keybindings are as follows:
 - `ESC`: Exits the application;
 - `F1`: Recaptures the frustum;
+- `F2`: Shows Shadow Map debug;
 - `W,A,S,D`: FPS camera movement;
 - `Shift`: Lowers the camera's y;
 - `Space`: Raises the camera's y;

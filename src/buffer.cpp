@@ -49,6 +49,9 @@ namespace iris {
 
     auto buffer_t::write(const void* data, uint64 size, uint64 offset) const noexcept -> const self& {
         assert(offset + size <= _size && "overflow");
+        if (size == 0) {
+            return *this;
+        }
         glBindBuffer(_type, _id);
         glBufferSubData(_type, offset, size, data);
         return *this;

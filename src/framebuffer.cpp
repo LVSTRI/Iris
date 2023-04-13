@@ -2,6 +2,8 @@
 
 #include <glad/gl.h>
 
+#include <array>
+
 namespace iris {
     framebuffer_attachment_t::framebuffer_attachment_t() noexcept = default;
 
@@ -24,8 +26,12 @@ namespace iris {
         glBindTexture(GL_TEXTURE_2D, attachment._id);
 
         glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, base_format, type, nullptr);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+        const auto color = std::to_array({ 1.0f, 1.0f, 1.0f, 1.0f });
+        glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, color.data());
 
         attachment._width = width;
         attachment._height = height;

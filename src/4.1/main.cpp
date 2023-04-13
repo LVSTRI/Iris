@@ -54,6 +54,15 @@ struct point_light_t {
     iris::float32 _pad4[2] = {};
 };
 
+struct directional_light_t {
+    glm::vec3 direction = {};
+    iris::float32 _pad0 = 0;
+    glm::vec3 diffuse = {};
+    iris::float32 _pad1 = 0;
+    glm::vec3 specular = {};
+    iris::float32 _pad2 = 0;
+};
+
 static auto generate_cube() noexcept {
     return std::vector<iris::vertex_t>({
         { { -0.5f, -0.5f, -0.5f }, {  0.0f, 0.0f, -1.0f }, { 0.0f, 0.0f } },
@@ -118,6 +127,7 @@ int main() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_SRGB_CAPABLE, GLFW_TRUE);
 
     auto terminate_glfw = iris::defer_t([]() {
         glfwTerminate();
@@ -204,12 +214,14 @@ int main() {
     auto simple_shader = iris::shader_t::create("../shaders/4.1/simple.vert", "../shaders/4.1/simple.frag");
     auto light_shader = iris::shader_t::create("../shaders/4.1/light.vert", "../shaders/4.1/light.frag");
     auto line_shader = iris::shader_t::create("../shaders/4.1/line.vert", "../shaders/4.1/line.frag");
+    auto shadow_shader = iris::shader_t::create("../shaders/4.1/shadow.vert", "../shaders/4.1/shadow.frag");
+    auto debug_shadow_shader = iris::shader_t::create("../shaders/4.1/debug_shadow.vert", "../shaders/4.1/debug_shadow.frag");
 
     // texture loading
     auto textures = std::vector<iris::texture_t>();
-    textures.emplace_back(iris::texture_t::create("../textures/wall.jpg"));
-    textures.emplace_back(iris::texture_t::create("../textures/container.png"));
-    textures.emplace_back(iris::texture_t::create("../textures/container_specular.png"));
+    textures.emplace_back(iris::texture_t::create("../textures/wall.jpg", iris::texture_type_t::non_linear_srgb));
+    textures.emplace_back(iris::texture_t::create("../textures/container.png", iris::texture_type_t::non_linear_srgb));
+    textures.emplace_back(iris::texture_t::create("../textures/container_specular.png", iris::texture_type_t::non_linear_srgb));
 
     auto meshes = std::vector<iris::mesh_t>();
     {
@@ -233,18 +245,17 @@ int main() {
     }
 
     auto light_positions = std::vector<glm::vec3>();
-    light_positions.emplace_back( 0.0f, 0.5f,  0.0f);
-    light_positions.emplace_back( 3.0f, 0.5f,  0.0f);
-    light_positions.emplace_back( 3.0f, 0.5f,  3.0f);
-    light_positions.emplace_back( 3.0f, 0.5f, -3.0f);
-    light_positions.emplace_back(-3.0f, 2.5f,  3.0f);
-    light_positions.emplace_back(-3.0f, 2.5f, -3.0f);
-    light_positions.emplace_back( 3.0f, 2.5f,  3.0f);
-    light_positions.emplace_back( 6.0f, 0.5f,  3.0f);
-    light_positions.emplace_back( 6.0f, 0.5f, -3.0f);
-    light_positions.emplace_back(-6.0f, 0.5f,  3.0f);
-    light_positions.emplace_back(-6.0f, 0.5f, -3.0f);
-
+    // light_positions.emplace_back( 0.0f, 0.5f,  0.0f);
+    // light_positions.emplace_back( 3.0f, 0.5f,  0.0f);
+    // light_positions.emplace_back( 3.0f, 0.5f,  3.0f);
+    // light_positions.emplace_back( 3.0f, 0.5f, -3.0f);
+    // light_positions.emplace_back(-3.0f, 2.5f,  3.0f);
+    // light_positions.emplace_back(-3.0f, 2.5f, -3.0f);
+    // light_positions.emplace_back( 3.0f, 2.5f,  3.0f);
+    // light_positions.emplace_back( 6.0f, 0.5f,  3.0f);
+    // light_positions.emplace_back( 6.0f, 0.5f, -3.0f);
+    // light_positions.emplace_back(-6.0f, 0.5f,  3.0f);
+    // light_positions.emplace_back(-6.0f, 0.5f, -3.0f);
 
     auto light_transforms = std::vector<glm::mat4>();
     for (const auto& light_position : light_positions) {
@@ -270,6 +281,12 @@ int main() {
             .quadratic = 0.44f,
         });
     }
+
+    auto dir_light_sun = directional_light_t{
+        .direction = glm::vec3(-2.25f, 35.0f, -6.5f),
+        .diffuse = glm::vec3(0.8f),
+        .specular = glm::vec3(0.5f),
+    };
 
     // aabb array section
     auto aabb_vao = 0_u32;
@@ -313,6 +330,9 @@ int main() {
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(iris::float32[3]), nullptr);
 
+    // sRGB framebuffer
+    glEnable(GL_FRAMEBUFFER_SRGB);
+
     // blending setup
     glEnable(GL_BLEND);
     // output.rgb = (input.rgb * input.a) + (previous.rgb * (1 - input.a))
@@ -351,6 +371,15 @@ int main() {
             GL_UNSIGNED_INT_24_8),
     });
 
+    auto f1_shadow_attachments = std::to_array({
+        iris::framebuffer_attachment_t::create(
+            1024,
+            1024,
+            GL_DEPTH_COMPONENT32F,
+            GL_DEPTH_COMPONENT,
+            GL_FLOAT),
+    });
+
     auto f0_main = iris::framebuffer_t::create({
         std::cref(f0_main_attachments[0]),
         std::cref(f0_main_attachments[1]),
@@ -364,6 +393,20 @@ int main() {
         glDrawBuffers(2, draw_attachments.data());
         glReadBuffer(GL_COLOR_ATTACHMENT1);
     }
+
+    auto f1_shadow = iris::framebuffer_t::create({
+        std::cref(f1_shadow_attachments[0]),
+    });
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+
+    // shadow camera
+    auto shadow_light_pos = dir_light_sun.direction;
+    auto shadow_light_proj = glm::ortho(-50.0f, 50.0f, -50.0f, 50.0f, 0.1f, 50.0f);
+    auto shadow_light_view = glm::lookAt(
+        shadow_light_pos,
+        glm::vec3(0.0f, 0.0f, 0.0f),
+        glm::vec3(0.0f, 1.0f, 0.0f));
 
     // fullscreen quad
     auto f_quad_data = std::to_array({
@@ -395,8 +438,12 @@ int main() {
 
     // uniform buffers
     auto camera_buffer = iris::buffer_t::create(sizeof(camera_data_t), GL_UNIFORM_BUFFER);
+    auto shadow_camera_buffer = iris::buffer_t::create(sizeof(camera_data_t), GL_UNIFORM_BUFFER);
     auto model_buffer = iris::buffer_t::create(sizeof(glm::mat4[16384]), GL_SHADER_STORAGE_BUFFER);
-    auto point_light_buffer = iris::buffer_t::create(sizeof(point_light_t[16]), GL_SHADER_STORAGE_BUFFER);
+    auto point_light_buffer = iris::buffer_t::create(sizeof(point_light_t[32]), GL_SHADER_STORAGE_BUFFER);
+    auto dir_light_buffer = iris::buffer_t::create(sizeof(directional_light_t[32]), GL_UNIFORM_BUFFER);
+
+    dir_light_buffer.write(&dir_light_sun, iris::size_bytes(dir_light_sun));
 
     // raycasting
     auto hit_mesh = std::optional<std::pair<std::reference_wrapper<const iris::mesh_t>, iris::uint32>>();
@@ -477,10 +524,36 @@ int main() {
             camera.view(),
             camera.position()
         };
+        auto shadow_camera_data = camera_data_t {
+            shadow_light_proj,
+            shadow_light_view,
+            shadow_light_pos
+        };
 
         camera_buffer.write(&camera_data, iris::size_bytes(camera_data));
+        shadow_camera_buffer.write(&shadow_camera_data, iris::size_bytes(shadow_camera_data));
         model_buffer.write(transforms.data(), iris::size_bytes(transforms));
         point_light_buffer.write(point_lights.data(), iris::size_bytes(point_lights));
+
+        // render the shadow map
+        f1_shadow.bind();
+        glEnable(GL_DEPTH_TEST);
+        glCullFace(GL_FRONT);
+        glViewport(0, 0, f1_shadow.width(), f1_shadow.height());
+        glScissor(0, 0, f1_shadow.width(), f1_shadow.height());
+        glClearDepth(1.0f);
+        glClear(GL_DEPTH_BUFFER_BIT);
+        for (const auto& [ref, id] : scene.meshes) {
+            const auto& mesh = ref.get();
+            shadow_shader
+                .bind()
+                .set(0, { id });
+            shadow_camera_buffer.bind_base(0);
+            model_buffer.bind_base(1);
+            mesh.draw();
+        }
+        glCullFace(GL_BACK);
+
 
         // 1. render the frustum lines
         f0_main.bind();
@@ -546,8 +619,10 @@ int main() {
                 .set(0, { mesh.id });
 
             camera_buffer.bind_base(0);
-            model_buffer.bind_range(1, 0, iris::size_bytes(transforms));
-            point_light_buffer.bind_range(2, 0, iris::size_bytes(point_lights));
+            shadow_camera_buffer.bind_base(1);
+            model_buffer.bind_range(2, 0, iris::size_bytes(transforms));
+            point_light_buffer.bind_range(3, 0, iris::size_bytes(point_lights) + 1);
+            dir_light_buffer.bind_base(4);
 
             for (auto j = 0_i32; const auto& texture : u_mesh.textures()) {
                 texture.get().bind(j);
@@ -556,6 +631,10 @@ int main() {
             }
             simple_shader.set(6, { 32_u32 });
             simple_shader.set(7, { static_cast<iris::uint32>(point_lights.size()) });
+
+            glActiveTexture(GL_TEXTURE2);
+            f1_shadow_attachments[0].bind();
+            simple_shader.set(8, { 2_i32 });
 
             u_mesh.draw();
         }
@@ -587,8 +666,10 @@ int main() {
                 .set(0, { mesh.id });
 
             camera_buffer.bind_base(0);
-            model_buffer.bind_range(1, 0, iris::size_bytes(transforms));
-            point_light_buffer.bind_range(2, 0, iris::size_bytes(point_lights));
+            shadow_camera_buffer.bind_base(1);
+            model_buffer.bind_range(2, 0, iris::size_bytes(transforms));
+            point_light_buffer.bind_range(3, 0, iris::size_bytes(point_lights) + 1);
+            dir_light_buffer.bind_base(4);
 
             for (auto j = 0_i32; const auto& texture : u_mesh.textures()) {
                 texture.get().bind(j);
@@ -597,6 +678,10 @@ int main() {
             }
             simple_shader.set(6, { 32_u32 });
             simple_shader.set(7, { static_cast<iris::uint32>(point_lights.size()) });
+
+            glActiveTexture(GL_TEXTURE2);
+            f1_shadow_attachments[0].bind();
+            simple_shader.set(8, { 2_i32 });
 
             u_mesh.draw();
         }
@@ -661,9 +746,43 @@ int main() {
         glClear(GL_COLOR_BUFFER_BIT);
 
         glBindVertexArray(f_quad_vao);
-        glBindTexture(GL_TEXTURE_2D, f0_main.attachment(0).id());
+        glActiveTexture(GL_TEXTURE0);
+        f0_main.attachment(0).bind();
         fullscreen_shader.set(0, { 0_i32 });
         glDrawArrays(GL_TRIANGLES, 0, 6);
+
+        // render debug shadow
+        if (glfwGetKey(window.handle, GLFW_KEY_F2) == GLFW_PRESS) {
+            fullscreen_shader.bind();
+            glDisable(GL_DEPTH_TEST);
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            const auto aspect =
+                static_cast<iris::float32>(window.height) /
+                static_cast<iris::float32>(window.width);
+            const auto debug_render_width = 512;
+            const auto debug_render_height = debug_render_width * aspect;
+            glViewport(
+                0,
+                window.height - debug_render_height + 1,
+                debug_render_width,
+                debug_render_height);
+            glScissor(
+                0,
+                window.height - debug_render_height + 1,
+                debug_render_width,
+                debug_render_height);
+            glClear(GL_COLOR_BUFFER_BIT);
+
+            debug_shadow_shader
+                .bind()
+                .set(0, { 0_i32 });
+            glBindVertexArray(f_quad_vao);
+            glActiveTexture(GL_TEXTURE0);
+            f1_shadow_attachments[0].bind();
+            fullscreen_shader.set(0, { 0_i32 });
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+            glEnable(GL_DEPTH_TEST);
+        }
 
         glfwSwapBuffers(window.handle);
         glfwPollEvents();

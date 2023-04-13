@@ -3,6 +3,11 @@
 #include <utilities.hpp>
 
 namespace iris {
+    enum class texture_type_t : uint32 {
+        linear_srgb,
+        non_linear_srgb,
+    };
+
     class texture_t {
     public:
         using self = texture_t;
@@ -15,7 +20,7 @@ namespace iris {
         texture_t(self&& other) noexcept;
         auto operator =(self&& other) noexcept -> self&;
 
-        static auto create(const fs::path& path) noexcept -> self;
+        static auto create(const fs::path& path, texture_type_t type) noexcept -> self;
 
         auto id() const noexcept -> uint32;
         auto width() const noexcept -> uint32;

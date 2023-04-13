@@ -21,7 +21,7 @@ namespace iris {
         return *this;
     }
 
-    auto texture_t::create(const fs::path& path) noexcept -> self {
+    auto texture_t::create(const fs::path& path, texture_type_t type) noexcept -> self {
         auto texture = self();
         auto width = 0_i32;
         auto height = 0_i32;
@@ -56,7 +56,8 @@ namespace iris {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+        const auto internal_format = type == texture_type_t::linear_srgb ? GL_RGBA8 : GL_SRGB8_ALPHA8;
+        glTexImage2D(GL_TEXTURE_2D, 0, internal_format, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
         glGenerateMipmap(GL_TEXTURE_2D);
         stbi_image_free(data);
 

@@ -36,7 +36,10 @@ namespace iris {
                     }
                 }
                 if (!textures.contains(path)) {
-                    textures[path] = texture_t::create(path);
+                    const auto t_type = type == aiTextureType_DIFFUSE ?
+                        texture_type_t::non_linear_srgb :
+                        texture_type_t::linear_srgb;
+                    textures[path] = texture_t::create(path, t_type);
                 }
                 return &textures[path];
             }
