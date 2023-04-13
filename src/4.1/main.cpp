@@ -522,6 +522,22 @@ int main() {
         // 2. render opaque objects
         const auto projection = camera.projection();
         const auto view = camera.view();
+        {
+            auto indices = std::vector<iris::uint64>(scene.opaque_meshes.size());
+            std::iota(indices.begin(), indices.end(), 0);
+            std::sort(indices.begin(), indices.end(), [&camera, &transforms, &scene](const auto& i, const auto& j) {
+                const auto& a_mesh = scene.opaque_meshes[i].ref.get();
+                const auto& b_mesh = scene.opaque_meshes[j].ref.get();
+                const auto& a_aabb = a_mesh.aabb();
+                const auto& b_aabb = b_mesh.aabb();
+
+                const auto a_center = transforms[i][0] * glm::vec4(a_aabb.center, 1.0f);
+                const auto b_center = transforms[j][0] * glm::vec4(b_aabb.center, 1.0f);
+                const auto a_distance = glm::distance(camera.position(), glm::vec3(a_center));
+                const auto b_distance = glm::distance(camera.position(), glm::vec3(b_center));
+                return a_distance < b_distance;
+            });
+        }
         for (const auto& mesh : scene.opaque_meshes) {
             const auto& u_mesh = mesh.ref.get();
 
@@ -545,20 +561,24 @@ int main() {
         }
 
         // sort and draw transparent objects
-        auto indices = std::vector<std::size_t>(scene.transparent_meshes.size());
-        std::iota(indices.begin(), indices.end(), 0);
-        std::sort(indices.begin(), indices.end(), [&camera, &transforms, &scene](const auto& i, const auto& j) {
-            const auto& a_mesh = scene.transparent_meshes[i].ref.get();
-            const auto& b_mesh = scene.transparent_meshes[j].ref.get();
-            const auto& a_aabb = a_mesh.aabb();
-            const auto& b_aabb = b_mesh.aabb();
+        {
+            auto indices = std::vector<iris::uint64>(scene.transparent_meshes.size());
+            std::iota(indices.begin(), indices.end(), 0);
+            std::sort(indices.begin(), indices.end(), [&camera, &transforms, &scene](const auto& i, const auto& j) {
+                const auto& a_mesh = scene.transparent_meshes[i].ref.get();
+                const auto& b_mesh = scene.transparent_meshes[j].ref.get();
+                const auto& a_aabb = a_mesh.aabb();
+                const auto& b_aabb = b_mesh.aabb();
 
-            const auto a_center = transforms[i][0] * glm::vec4(a_aabb.center, 1.0f);
-            const auto b_center = transforms[j][0] * glm::vec4(b_aabb.center, 1.0f);
-            const auto a_distance = glm::distance(camera.position(), glm::vec3(a_center));
-            const auto b_distance = glm::distance(camera.position(), glm::vec3(b_center));
-            return a_distance > b_distance;
-        });
+                const auto opaque_offset = scene.opaque_meshes.size();
+                const auto a_center = transforms[opaque_offset + i][0] * glm::vec4(a_aabb.center, 1.0f);
+                const auto b_center = transforms[opaque_offset + j][0] * glm::vec4(b_aabb.center, 1.0f);
+                const auto a_distance = glm::distance(camera.position(), glm::vec3(a_center));
+                const auto b_distance = glm::distance(camera.position(), glm::vec3(b_center));
+                return a_distance > b_distance;
+            });
+        }
+
         for (const auto& mesh : scene.transparent_meshes) {
             const auto& u_mesh = mesh.ref.get();
 
@@ -625,7 +645,7 @@ int main() {
                 glReadPixels(c_x, window.height - c_y, 1, 1, GL_RED_INTEGER, GL_UNSIGNED_INT, &mesh_id);
                 if (mesh_id != -1 && mesh_id < scene.meshes.size()) {
                     hit_mesh = {
-                        std::ref(scene.meshes[mesh_id].ref.get()),
+                        std::cref(scene.meshes[mesh_id].ref.get()),
                         mesh_id
                     };
                 }

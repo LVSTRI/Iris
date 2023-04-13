@@ -21,7 +21,6 @@ namespace iris {
         auto width() const noexcept -> uint32;
         auto height() const noexcept -> uint32;
         auto channels() const noexcept -> uint32;
-
         auto is_opaque() const noexcept -> bool;
 
         auto bind(uint32 index) const noexcept -> void;

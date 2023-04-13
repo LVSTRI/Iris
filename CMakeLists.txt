@@ -67,3 +67,6 @@ target_link_libraries(Buffers PUBLIC Iris)
 
 add_executable(AdvancedLighting src/4.1/main.cpp)
 target_link_libraries(AdvancedLighting PUBLIC Iris)
+
+add_executable(BasicRaytracing src/4.2/main.cpp)
+target_link_libraries(BasicRaytracing PUBLIC Iris)

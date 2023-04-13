@@ -18,7 +18,7 @@ The keybindings are as follows:
 
 ## Building
 To build this project you will need [CMake](https://cmake.org/) and a C++ compiler. Futhermore you will need to install
-[Python](https://www.python.org/) and [Pip](https://pypi.org/project/pip/) to install dependencies (`jinja2`).
+[Python](https://www.python.org/) and [pip](https://pypi.org/project/pip/) to install dependencies (`jinja2`).
 
 Compiling the project requires the following commands:
 - `git clone --recursive [This Repo]`
@@ -33,6 +33,7 @@ Where `[target]` is any of:
 - Framebuffers
 - Buffers
 - AdvancedLighting
+- BasicRaytracing
 
 ## Assets
 To actually run the targets present in this you will need **assets**, reference the [models](models) folder.
