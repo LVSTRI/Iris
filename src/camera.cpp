@@ -53,7 +53,15 @@ namespace iris {
     }
 
     auto camera_t::fov() const noexcept -> iris::float32 {
-        return _fov;
+        return glm::radians(_fov);
+    }
+
+    auto camera_t::aspect() const noexcept -> iris::float32 {
+        const auto& window = _window.get();
+        const auto aspect =
+            static_cast<iris::float32>(window.width) /
+            static_cast<iris::float32>(window.height);
+        return aspect;
     }
 
     auto camera_t::near() const noexcept -> iris::float32 {
@@ -69,11 +77,7 @@ namespace iris {
     }
 
     auto camera_t::projection() const noexcept -> glm::mat4 {
-        const auto& window = _window.get();
-        const auto aspect =
-            static_cast<iris::float32>(window.width) /
-            static_cast<iris::float32>(window.height);
-        return glm::perspective(glm::radians(_fov), aspect, _near, _far);
+        return glm::perspective(glm::radians(_fov), aspect(), _near, _far);
     }
 
     auto camera_t::update(iris::float32 dt) noexcept -> void {

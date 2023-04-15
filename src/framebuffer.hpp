@@ -19,14 +19,16 @@ namespace iris {
         framebuffer_attachment_t(self&& other) noexcept;
         auto operator =(self&& other) noexcept -> self&;
 
-        static auto create(uint32 width, uint32 height, int32 format, int32 base_format, uint32 type) noexcept -> self;
+        static auto create(uint32 width, uint32 height, uint32 layers, int32 format, int32 base_format, uint32 type) noexcept -> self;
 
         auto id() const noexcept -> uint32;
         auto width() const noexcept -> uint32;
         auto height() const noexcept -> uint32;
+        auto layers() const noexcept -> uint32;
         auto format() const noexcept -> uint32;
         auto base_format() const noexcept -> uint32;
         auto type() const noexcept -> uint32;
+        auto target() const noexcept -> uint32;
 
         auto bind() const noexcept -> void;
 
@@ -36,9 +38,12 @@ namespace iris {
         uint32 _id = 0;
         uint32 _width = 0;
         uint32 _height = 0;
+        uint32 _layers = 0;
         int32 _format = 0;
         int32 _base_format = 0;
         uint32 _type = 0;
+
+        uint32 _target = 0;
     };
 
     class framebuffer_t {
@@ -64,6 +69,8 @@ namespace iris {
 
         auto attachment(uint32 index) -> const framebuffer_attachment_t&;
         auto is_complete() const noexcept -> bool;
+
+        auto set_layer(uint32 index, uint32 layer) const noexcept -> void;
 
         auto swap(self& other) noexcept -> void;
 

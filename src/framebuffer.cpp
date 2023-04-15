@@ -5,6 +5,15 @@
 #include <array>
 
 namespace iris {
+    static auto base_format_to_attachment(uint32 base_format, uint32 index = -1) noexcept -> uint32 {
+        switch (base_format) {
+            case GL_DEPTH_COMPONENT: return GL_DEPTH_ATTACHMENT;
+            case GL_STENCIL_INDEX: return GL_STENCIL_ATTACHMENT;
+            case GL_DEPTH_STENCIL: return GL_DEPTH_STENCIL_ATTACHMENT;
+            default: return GL_COLOR_ATTACHMENT0 + index;
+        }
+    }
+
     framebuffer_attachment_t::framebuffer_attachment_t() noexcept = default;
 
     framebuffer_attachment_t::~framebuffer_attachment_t() noexcept {
@@ -20,24 +29,32 @@ namespace iris {
         return *this;
     }
 
-    auto framebuffer_attachment_t::create(uint32 width, uint32 height, int32 format, int32 base_format, uint32 type) noexcept -> self {
+    auto framebuffer_attachment_t::create(uint32 width, uint32 height, uint32 layers, int32 format, int32 base_format, uint32 type) noexcept -> self {
         auto attachment = self();
-        glGenTextures(1, &attachment._id);
-        glBindTexture(GL_TEXTURE_2D, attachment._id);
+        const auto target = layers == 1 ? GL_TEXTURE_2D : GL_TEXTURE_2D_ARRAY;
 
-        glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, base_format, type, nullptr);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+        glGenTextures(1, &attachment._id);
+        glBindTexture(target, attachment._id);
+
+        if (layers > 1) {
+            glTexImage3D(target, 0, format, width, height, layers, 0, base_format, type, nullptr);
+        } else {
+            glTexImage2D(target, 0, format, width, height, 0, base_format, type, nullptr);
+        }
+        glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+        glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
         const auto color = std::to_array({ 1.0f, 1.0f, 1.0f, 1.0f });
-        glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, color.data());
+        glTexParameterfv(target, GL_TEXTURE_BORDER_COLOR, color.data());
 
         attachment._width = width;
         attachment._height = height;
+        attachment._layers = layers;
         attachment._format = format;
         attachment._base_format = base_format;
         attachment._type = type;
+        attachment._target = target;
         return attachment;
     }
 
@@ -53,6 +70,10 @@ namespace iris {
         return _height;
     }
 
+    auto framebuffer_attachment_t::layers() const noexcept -> uint32 {
+        return _layers;
+    }
+
     auto framebuffer_attachment_t::format() const noexcept -> uint32 {
         return _format;
     }
@@ -65,8 +86,12 @@ namespace iris {
         return _type;
     }
 
+    auto framebuffer_attachment_t::target() const noexcept -> uint32 {
+        return _target;
+    }
+
     auto framebuffer_attachment_t::bind() const noexcept -> void {
-        glBindTexture(GL_TEXTURE_2D, _id);
+        glBindTexture(_target, _id);
     }
 
     auto framebuffer_attachment_t::swap(self& other) noexcept -> void {
@@ -74,9 +99,11 @@ namespace iris {
         swap(_id, other._id);
         swap(_width, other._width);
         swap(_height, other._height);
+        swap(_layers, other._layers);
         swap(_format, other._format);
         swap(_base_format, other._base_format);
         swap(_type, other._type);
+        swap(_target, other._target);
     }
 
     framebuffer_t::framebuffer_t() noexcept = default;
@@ -102,25 +129,9 @@ namespace iris {
 
         for (auto i = 0; i < attachments.size(); ++i) {
             const auto& u_attachment = attachments[i].get();
-            auto target = 0_u32;
-            switch (u_attachment.base_format()) {
-                case GL_DEPTH_COMPONENT:
-                    target = GL_DEPTH_ATTACHMENT;
-                    break;
-
-                case GL_STENCIL_INDEX:
-                    target = GL_STENCIL_ATTACHMENT;
-                    break;
-
-                case GL_DEPTH_STENCIL:
-                    target = GL_DEPTH_STENCIL_ATTACHMENT;
-                    break;
-
-                default:
-                    target = GL_COLOR_ATTACHMENT0 + i;
-                    break;
-            }
-            glFramebufferTexture2D(GL_FRAMEBUFFER, target, GL_TEXTURE_2D, u_attachment.id(), 0);
+            auto target = base_format_to_attachment(u_attachment.base_format(), i);
+            u_attachment.bind();
+            glFramebufferTexture(GL_FRAMEBUFFER, target, u_attachment.id(), 0);
         }
         framebuffer._width = attachments[0].get().width();
         framebuffer._height = attachments[0].get().height();
@@ -147,6 +158,9 @@ namespace iris {
 
     auto framebuffer_t::bind() const noexcept -> void {
         glBindFramebuffer(GL_FRAMEBUFFER, _id);
+        for (const auto& attachment : _attachments) {
+            attachment.get().bind();
+        }
     }
 
     auto framebuffer_t::attachment(uint32 index) -> const framebuffer_attachment_t& {
@@ -156,6 +170,20 @@ namespace iris {
     auto framebuffer_t::is_complete() const noexcept -> bool {
         bind();
         return glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    }
+
+    auto framebuffer_t::set_layer(uint32 index, uint32 layer) const noexcept -> void {
+        bind();
+        const auto& u_attachment = _attachments[index].get();
+        if (u_attachment.layers() > 1) {
+            u_attachment.bind();
+            glFramebufferTextureLayer(
+                GL_FRAMEBUFFER,
+                base_format_to_attachment(u_attachment.base_format()),
+                u_attachment.id(),
+                0,
+                layer);
+        }
     }
 
     auto framebuffer_t::swap(self& other) noexcept -> void {

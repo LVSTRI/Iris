@@ -22,19 +22,35 @@ struct point_light_t {
     float quadratic;
 };
 
+struct shadow_frustum_t {
+    mat4 projection;
+    mat4 view;
+    vec4 partitions;
+};
+
 layout (location = 0) in vec3 frag_pos;
-layout (location = 1) in vec4 frag_pos_shadow;
-layout (location = 2) in vec3 normal;
-layout (location = 3) in vec2 uv;
-layout (location = 4) in flat vec3 camera_pos;
-layout (location = 5) in flat uint transform_id;
+layout (location = 1) in vec3 normal;
+layout (location = 2) in vec2 uv;
+layout (location = 3) in flat vec3 camera_pos;
+layout (location = 4) in flat uint transform_id;
 
 layout (location = 0) out vec4 out_pixel;
 layout (location = 1) out uint out_transform_id;
 
+layout (location = 1) uniform uint num_cascades;
 layout (location = 4) uniform material_t material;
 layout (location = 7) uniform uint n_point_lights;
-layout (location = 8) uniform sampler2D shadow_map;
+layout (location = 8) uniform sampler2DArray shadow_map;
+
+layout (std140, binding = 0) uniform camera_uniform_t {
+    mat4 projection;
+    mat4 view;
+    vec3 position;
+} camera;
+
+layout (std430, binding = 2) readonly restrict buffer shadow_camera_buffer_t {
+    shadow_frustum_t[] shadow_frustums;
+};
 
 layout (std140, binding = 3) readonly restrict buffer point_light_uniform_t {
     point_light_t[] data;
@@ -43,6 +59,16 @@ layout (std140, binding = 3) readonly restrict buffer point_light_uniform_t {
 layout (std140, binding = 4) uniform directional_light_uniform_t {
     directional_light_t dir_light;
 };
+
+uint calculate_cascade() {
+    const float dist = abs((camera.view * vec4(frag_pos, 1.0)).z);
+    for (uint i = 0; i < num_cascades; ++i) {
+        if (dist < shadow_frustums[i].partitions[1]) {
+            return i;
+        }
+    }
+    return num_cascades - 1;
+}
 
 vec3 calculate_point_light(point_light_t light, vec3 diffuse_color, vec3 specular_color, vec3 normal) {
     const vec3 ambient_result = light.ambient * diffuse_color;
@@ -82,13 +108,14 @@ vec3 calculate_directional_light(vec3 diffuse_color, vec3 specular_color, vec3 n
     return diffuse_result + specular_result;
 }
 
-float calculate_shadow() {
+float calculate_shadow(vec3 normal, uint cascade) {
+    const vec3 frag_pos_shadow = vec3(shadow_frustums[cascade].projection * shadow_frustums[cascade].view * vec4(frag_pos, 1.0));
     const vec3 proj_coords = frag_pos_shadow.xyz * 0.5 + 0.5;
     if (proj_coords.z > 1.0) {
         return 1.0;
     }
     const vec2 texel_size = 1.0 / textureSize(shadow_map, 0).xy;
-    const vec2[] offsets = vec2[](
+    const vec2[] shadow_sampling_offsets = vec2[](
         vec2(0.0, 0.0),
         vec2(0.0, 1.0),
         vec2(1.0, 0.0),
@@ -105,10 +132,13 @@ float calculate_shadow() {
         vec2(0.25, 0.5),
         vec2(0.5, 0.25),
         vec2(0.75, 0.5));
-    const float bias = 0.0125;
+    const vec3 n_light_dir = normalize(dir_light.direction);
+    const float width = 0.00025;
+    const float bias = clamp((width / 2.0) * tan(acos(clamp(dot(normal, n_light_dir), -1.0, 1.0))), 0.0, width);
     float sampled_depth = 0.0;
     for (uint i = 0; i < 16; ++i) {
-        const float closest = texture(shadow_map, proj_coords.xy + offsets[i] * texel_size).r;
+        const vec2 s_uv = proj_coords.xy + shadow_sampling_offsets[i] * texel_size;
+        const float closest = texture(shadow_map, vec3(s_uv, cascade)).r;
         const float current = proj_coords.z;
         sampled_depth += 1.0 - float(current - bias > closest);
     }
@@ -122,6 +152,7 @@ void main() {
     const vec3 specular = texture(material.specular, uv).rgb;
     const vec3 ambient = diffuse * ambient_factor;
     const vec3 n_normal = normalize(normal);
+    const uint cascade = calculate_cascade();
 
     vec3 color = ambient;
     for (uint i = 0; i < n_point_lights; i++) {
@@ -130,7 +161,7 @@ void main() {
 
     color +=
         calculate_directional_light(diffuse, specular, n_normal) *
-        calculate_shadow();
+        calculate_shadow(n_normal, cascade);
 
     out_pixel = vec4(color, alpha);
     out_transform_id = transform_id;

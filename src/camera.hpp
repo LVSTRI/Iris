@@ -50,6 +50,7 @@ namespace iris {
         auto yaw() const noexcept -> iris::float32;
         auto pitch() const noexcept -> iris::float32;
         auto fov() const noexcept -> iris::float32;
+        auto aspect() const noexcept -> iris::float32;
         auto near() const noexcept -> iris::float32;
         auto far() const noexcept -> iris::float32;
 
