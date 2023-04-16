@@ -69,6 +69,24 @@ namespace iris {
         return shader;
     }
 
+    auto shader_t::create_compute(const fs::path& compute) noexcept -> self {
+        auto shader = self();
+        shader._id = glCreateProgram();
+        auto compute_shader = glCreateShader(GL_COMPUTE_SHADER);
+        const auto compute_shader_file = iris::whole_file(compute);
+        const auto* compute_shader_source = compute_shader_file.c_str();
+        glShaderSource(compute_shader, 1, &compute_shader_source, nullptr);
+        glCompileShader(compute_shader);
+        shader_compile_status(compute_shader);
+
+        glAttachShader(shader._id, compute_shader);
+        glLinkProgram(shader._id);
+        program_link_status(shader._id);
+
+        glDeleteShader(compute_shader);
+        return shader;
+    }
+
     auto shader_t::bind() const noexcept -> const self& {
         glUseProgram(_id);
         return *this;

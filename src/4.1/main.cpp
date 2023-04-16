@@ -164,9 +164,9 @@ static auto calculate_shadow_frustum(const iris::camera_t& camera, const glm::ve
             max = glm::max(max, light_space_point);
         }
         if (min.z < 0) {
-            min.z *= 10.0f;
+            min.z *= 15.0f;
         } else {
-            min.z /= 10.0f;
+            min.z /= 15.0f;
         }
         if (max.z < 0) {
             max.z /= 10.0f;
@@ -187,6 +187,23 @@ static auto calculate_shadow_frustum(const iris::camera_t& camera, const glm::ve
         partition(10.0f, 20.0f),
         partition(20.0f, camera.far()),
     };
+}
+
+static auto calculate_workgroup_count_from_wh(iris::uint32 width, iris::uint32 height) noexcept -> std::vector<glm::uvec2> {
+    constexpr auto workgroup_size = 16_u32;
+    auto workgroup_count = std::vector<glm::uvec2>();
+    workgroup_count.reserve(16);
+    workgroup_count.emplace_back(
+        (width + workgroup_size - 1) / workgroup_size,
+        (height + workgroup_size - 1) / workgroup_size);
+    while (workgroup_count.back() != glm::uvec2(1)) {
+        const auto& previous = workgroup_count.back();
+        const auto current_size = glm::uvec2(
+            (previous.x + workgroup_size - 1) / workgroup_size,
+            (previous.y + workgroup_size - 1) / workgroup_size);
+        workgroup_count.emplace_back(glm::max(current_size, glm::uvec2(1)));
+    }
+    return workgroup_count;
 }
 
 int main() {
@@ -288,8 +305,11 @@ int main() {
     auto simple_shader = iris::shader_t::create("../shaders/4.1/simple.vert", "../shaders/4.1/simple.frag");
     auto light_shader = iris::shader_t::create("../shaders/4.1/light.vert", "../shaders/4.1/light.frag");
     auto line_shader = iris::shader_t::create("../shaders/4.1/line.vert", "../shaders/4.1/line.frag");
-    auto shadow_shader = iris::shader_t::create("../shaders/4.1/shadow.vert", "../shaders/4.1/shadow.frag");
+    auto shadow_shader = iris::shader_t::create("../shaders/4.1/shadow.vert", "../shaders/4.1/empty.frag");
+    auto depth_only_shader = iris::shader_t::create("../shaders/4.1/depth_only.vert", "../shaders/4.1/empty.frag");
     auto debug_shadow_shader = iris::shader_t::create("../shaders/4.1/debug_shadow.vert", "../shaders/4.1/debug_shadow.frag");
+    auto depth_reduce_init_shader = iris::shader_t::create_compute("../shaders/4.1/depth_reduce_init.comp");
+    auto depth_reduce_shader = iris::shader_t::create_compute("../shaders/4.1/depth_reduce.comp");
 
     // texture loading
     auto textures = std::vector<iris::texture_t>();
@@ -408,11 +428,11 @@ int main() {
     glEnable(GL_FRAMEBUFFER_SRGB);
 
     // blending setup
-    glEnable(GL_BLEND);
+    glDisable(GL_BLEND);
     // output.rgb = (input.rgb * input.a) + (previous.rgb * (1 - input.a))
     // output.a = (input.a * 1) + (previous.a * 0)
-    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ZERO);
-    glBlendEquation(GL_FUNC_ADD);
+    // glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ZERO);
+    // glBlendEquation(GL_FUNC_ADD);
 
     // face culling
     glEnable(GL_CULL_FACE);
@@ -420,8 +440,8 @@ int main() {
     glFrontFace(GL_CCW);
 
     // multisampling
-    glEnable(GL_SAMPLE_ALPHA_TO_ONE);
-    glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+    // glEnable(GL_SAMPLE_ALPHA_TO_ONE);
+    // glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
 
     // mouse picking
     auto f0_main_attachments = std::to_array({
@@ -506,12 +526,28 @@ int main() {
     auto delta_time = 0.0f;
     auto last_frame = 0.0f;
 
+
     // uniform buffers
     auto camera_buffer = iris::buffer_t::create(sizeof(camera_data_t), GL_UNIFORM_BUFFER);
     auto shadow_camera_buffer = iris::buffer_t::create(sizeof(shadow_frustum_t[4]), GL_SHADER_STORAGE_BUFFER);
     auto model_buffer = iris::buffer_t::create(sizeof(glm::mat4[16384]), GL_SHADER_STORAGE_BUFFER);
     auto point_light_buffer = iris::buffer_t::create(sizeof(point_light_t[32]), GL_SHADER_STORAGE_BUFFER);
     auto dir_light_buffer = iris::buffer_t::create(sizeof(directional_light_t[32]), GL_UNIFORM_BUFFER);
+
+    // depth reduce output
+    // yes I know this isn't a framebuffer attachment
+    auto depth_reduce_wgc = calculate_workgroup_count_from_wh(window.width, window.height);
+    auto depth_reduce_outs = std::vector<iris::framebuffer_attachment_t>();
+    depth_reduce_outs.reserve(32);
+    for (const auto& each : depth_reduce_wgc) {
+        depth_reduce_outs.emplace_back(iris::framebuffer_attachment_t::create(
+            each.x,
+            each.y,
+            1,
+            GL_RG32F,
+            GL_RG,
+            GL_FLOAT));
+    }
 
     // raycasting
     auto hit_mesh = std::optional<std::pair<std::reference_wrapper<const iris::mesh_t>, iris::uint32>>();
@@ -587,6 +623,19 @@ int main() {
             });
             glDrawBuffers(2, draw_attachments.data());
             glReadBuffer(GL_COLOR_ATTACHMENT1);
+
+            depth_reduce_wgc = calculate_workgroup_count_from_wh(window.width, window.height);
+            depth_reduce_outs.clear();
+            for (const auto& each : depth_reduce_wgc) {
+                depth_reduce_outs.emplace_back(iris::framebuffer_attachment_t::create(
+                    each.x,
+                    each.y,
+                    1,
+                    GL_RG32F,
+                    GL_RG,
+                    GL_FLOAT));
+            }
+
             window.is_resized = false;
         }
 
@@ -599,7 +648,7 @@ int main() {
         dir_light_sun.direction = glm::vec3(-2.25f * glm::sin(current_time), 35.0f, -6.5f * glm::cos(current_time));
 
         // shadow camera
-        const auto shadow_frustums = calculate_shadow_frustum(camera, dir_light_sun.direction);
+        const auto shadow_frustums = calculate_shadow_frustum(camera, glm::normalize(dir_light_sun.direction));
 
         camera_buffer.write(&camera_data, iris::size_bytes(camera_data));
         shadow_camera_buffer.write(shadow_frustums.data(), iris::size_bytes(shadow_frustums));
@@ -607,6 +656,50 @@ int main() {
         point_light_buffer.write(point_lights.data(), iris::size_bytes(point_lights));
         dir_light_buffer.write(&dir_light_sun, iris::size_bytes(dir_light_sun));
 
+        f0_main.bind();
+        glDrawBuffer(GL_NONE);
+        glReadBuffer(GL_NONE);
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LEQUAL);
+        glCullFace(GL_BACK);
+        glViewport(0, 0, f0_main.width(), f0_main.height());
+        glScissor(0, 0, f0_main.width(), f0_main.height());
+        const auto clear_depth = glm::vec4(1.0f);
+        glClearBufferfv(GL_DEPTH, 0, glm::value_ptr(clear_depth));
+        for (const auto& [ref, id] : scene.meshes) {
+            const auto& mesh = ref.get();
+            depth_only_shader
+                .bind()
+                .set(0, { id });
+            camera_buffer.bind_base(0);
+            model_buffer.bind_base(1);
+            mesh.draw();
+        }
+
+        // depth reduce
+        glActiveTexture(GL_TEXTURE0);
+        f0_main_attachments[2].bind();
+        depth_reduce_init_shader
+            .bind()
+            .set(0, { 0_i32 });
+        glBindImageTexture(0, depth_reduce_outs[0].id(), 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG32F);
+        glDispatchCompute(depth_reduce_wgc[0].x, depth_reduce_wgc[0].y, 1);
+
+        depth_reduce_shader.bind();
+        for (auto i = 1_u32; i < depth_reduce_outs.size(); ++i) {
+            glBindImageTexture(0, depth_reduce_outs[i - 1].id(), 0, GL_FALSE, 0, GL_READ_ONLY, GL_RG32F);
+            glBindImageTexture(1, depth_reduce_outs[i].id(), 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG32F);
+            glDispatchCompute(depth_reduce_wgc[i].x, depth_reduce_wgc[i].y, 1);
+        }
+
+        {
+            const auto draw_attachments = std::to_array<GLenum>({
+                GL_COLOR_ATTACHMENT0,
+                GL_COLOR_ATTACHMENT1
+            });
+            glDrawBuffers(2, draw_attachments.data());
+            glReadBuffer(GL_COLOR_ATTACHMENT1);
+        }
         // render the shadow map
         f1_shadow.bind();
         glEnable(GL_DEPTH_TEST);
@@ -629,8 +722,6 @@ int main() {
             }
         }
 
-        glCullFace(GL_BACK);
-
         // 1. render the frustum lines
         f0_main.bind();
         glEnable(GL_DEPTH_TEST);
@@ -638,12 +729,11 @@ int main() {
         glViewport(0, 0, window.width, window.height);
         const auto clear_color = glm::vec4(0.05f, 0.05f, 0.05f, 1.0f);
         const auto clear_id = glm::uvec4(0xffffffff);
-        const auto clear_depth = glm::vec4(1.0f);
         glClearBufferfv(GL_COLOR, 0, glm::value_ptr(clear_color));
         glClearBufferuiv(GL_COLOR, 1, glm::value_ptr(clear_id));
-        glClearBufferfv(GL_DEPTH, 0, glm::value_ptr(clear_depth));
 
         // debug AABBs
+        glDisable(GL_DEPTH_TEST);
         if (glfwGetKey(window.handle, GLFW_KEY_F) == GLFW_PRESS) {
             auto mesh_id = 0_u32;
             for (const auto& model : models) {
@@ -667,24 +757,10 @@ int main() {
                 }
             }
         }
-
+        glEnable(GL_DEPTH_TEST);
+        glCullFace(GL_BACK);
+        glDepthFunc(GL_EQUAL);
         // 2. render opaque objects
-        {
-            auto indices = std::vector<iris::uint64>(scene.opaque_meshes.size());
-            std::iota(indices.begin(), indices.end(), 0);
-            std::sort(indices.begin(), indices.end(), [&camera, &transforms, &scene](const auto& i, const auto& j) {
-                const auto& a_mesh = scene.opaque_meshes[i].ref.get();
-                const auto& b_mesh = scene.opaque_meshes[j].ref.get();
-                const auto& a_aabb = a_mesh.aabb();
-                const auto& b_aabb = b_mesh.aabb();
-
-                const auto a_center = transforms[i][0] * glm::vec4(a_aabb.center, 1.0f);
-                const auto b_center = transforms[j][0] * glm::vec4(b_aabb.center, 1.0f);
-                const auto a_distance = glm::distance(camera.position(), glm::vec3(a_center));
-                const auto b_distance = glm::distance(camera.position(), glm::vec3(b_center));
-                return a_distance < b_distance;
-            });
-        }
         for (const auto& mesh : scene.opaque_meshes) {
             const auto& u_mesh = mesh.ref.get();
 

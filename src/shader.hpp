@@ -23,6 +23,7 @@ namespace iris {
         auto operator =(self&& other) noexcept -> self&;
 
         static auto create(const fs::path& vertex, const fs::path& fragment) noexcept -> self;
+        static auto create_compute(const fs::path& compute) noexcept -> self;
 
         auto bind() const noexcept -> const self&;
 

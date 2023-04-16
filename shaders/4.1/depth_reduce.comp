@@ -1,0 +1,38 @@
+#version 460 core
+#define INVOCATION_SIZE 16
+#define INVOCATION_THREADS (INVOCATION_SIZE * INVOCATION_SIZE)
+
+layout (local_size_x = INVOCATION_SIZE, local_size_y = INVOCATION_SIZE, local_size_z = 1) in;
+
+layout (rg32f, binding = 0) uniform readonly image2D in_depth;
+layout (rg32f, binding = 1) uniform writeonly image2D out_depth;
+
+shared vec2 shared_depth[INVOCATION_THREADS];
+
+void main() {
+    // load
+    const ivec2 position = min(ivec2(gl_GlobalInvocationID.xy), imageSize(in_depth) - 1);
+    const float depth_sample = imageLoad(in_depth, position).r;
+    float c_min = 1.0;
+    float c_max = 0.0;
+    if (depth_sample < 1.0) {
+        c_min = min(c_min, depth_sample);
+        c_max = max(c_max, depth_sample);
+    }
+    shared_depth[gl_LocalInvocationIndex] = vec2(c_min, c_max);
+    barrier();
+
+    for (uint i = INVOCATION_THREADS / 2; i > 0; i >>= 1) {
+        if (gl_LocalInvocationIndex < i) {
+            const vec2 d1 = shared_depth[gl_LocalInvocationIndex];
+            const vec2 d2 = shared_depth[gl_LocalInvocationIndex + i];
+            shared_depth[gl_LocalInvocationIndex].x = min(d1.x, d2.x);
+            shared_depth[gl_LocalInvocationIndex].y = max(d1.y, d2.y);
+        }
+        barrier();
+    }
+
+    if (gl_LocalInvocationIndex == 0) {
+        imageStore(out_depth, ivec2(gl_WorkGroupID.xy), vec4(shared_depth[0].xy, 0.0, 0.0));
+    }
+}
