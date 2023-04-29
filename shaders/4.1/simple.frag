@@ -130,8 +130,8 @@ vec3 sample_shadow(in vec3 shadow_frag_pos, in vec3 ddx_shadow_frag_pos, in vec3
     const vec2 shadow_size = vec2(textureSize(shadow_map, 0));
     const vec2 texel_size = 1.0 / shadow_size;
 
-    const float plane_bias = min(dot(vec2(1.0) * texel_size, abs(calcualte_depth_plane_bias(ddx_shadow_frag_pos, ddy_shadow_frag_pos))), 0.01);
-
+    const vec2 bias_uv = calcualte_depth_plane_bias(ddx_shadow_frag_pos, ddy_shadow_frag_pos);
+    const float plane_bias = min(dot(vec2(1.0) * texel_size, abs(bias_uv)), 0.01);
     const vec3 n_light_dir = normalize(dir_light.direction);
     const float n_dot_l = dot(normal, n_light_dir);
     const float width = plane_bias * (1 / (8.0 * float(cascade + 1)));
@@ -176,12 +176,12 @@ void main() {
         calculate_directional_light(diffuse, specular, n_normal) *
         calculate_shadow(n_normal, cascade);
 
-    /*switch (cascade) {
+    switch (cascade) {
         case 0: color *= vec3(1.0, 0.5, 0.5); break;
         case 1: color *= vec3(0.5, 1.0, 0.5); break;
         case 2: color *= vec3(0.5, 0.5, 1.0); break;
         case 3: color *= vec3(1.0, 1.0, 0.5); break;
-    }*/
+    }
     out_pixel = vec4(color, alpha);
     out_transform_id = transform_id;
 }

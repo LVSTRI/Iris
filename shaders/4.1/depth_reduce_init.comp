@@ -27,6 +27,8 @@ void main() {
     float c_max = 0.0;
     // linearize Z
     if (depth_sample < 1.0) {
+        depth_sample = (2.0 * near * far) / (far + near - depth_sample * (far - near));
+        depth_sample = clamp((depth_sample - near) / (far - near), 0.0, 1.0);
         c_min = min(c_min, depth_sample);
         c_max = max(c_max, depth_sample);
     }

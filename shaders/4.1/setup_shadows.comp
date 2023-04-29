@@ -72,18 +72,12 @@ mat4 mat4_make_view(in vec3 eye, in vec3 center, in vec3 up) {
 //   - https://github.com/TheRealMJP/Shadows;
 //   - https://johanmedestrom.wordpress.com/2016/03/18/opengl-cascaded-shadow-maps/
 void main() {
-    // linearize Z
     const float near_clip = setup_data.near;
     const float far_clip = setup_data.far;
 
-    // ignore this for now
     vec2 reduction_depth = imageLoad(depth, ivec2(0)).rg;
-    reduction_depth = reduction_depth * 2.0 - 1.0;
-    reduction_depth = (2.0 * near_clip * far_clip) / (far_clip + near_clip - reduction_depth * (far_clip - near_clip));
-    reduction_depth = clamp(reduction_depth * 0.5 + 0.5, 0.0, 1.0);
-
-    const float min_depth = 0.0;
-    const float max_depth = 1.0;
+    const float min_depth = reduction_depth.x;
+    const float max_depth = reduction_depth.y;
 
     float[] cascade_splits = float[CASCADE_COUNT](0.0);
     // PSSM
