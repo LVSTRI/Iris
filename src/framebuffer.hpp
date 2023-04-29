@@ -19,7 +19,7 @@ namespace iris {
         framebuffer_attachment_t(self&& other) noexcept;
         auto operator =(self&& other) noexcept -> self&;
 
-        static auto create(uint32 width, uint32 height, uint32 layers, int32 format, int32 base_format, uint32 type) noexcept -> self;
+        static auto create(uint32 width, uint32 height, uint32 layers, int32 format, int32 base_format, uint32 type, bool nearest = true) noexcept -> self;
 
         auto id() const noexcept -> uint32;
         auto width() const noexcept -> uint32;

@@ -29,7 +29,7 @@ namespace iris {
         return *this;
     }
 
-    auto framebuffer_attachment_t::create(uint32 width, uint32 height, uint32 layers, int32 format, int32 base_format, uint32 type) noexcept -> self {
+    auto framebuffer_attachment_t::create(uint32 width, uint32 height, uint32 layers, int32 format, int32 base_format, uint32 type, bool nearest) noexcept -> self {
         auto attachment = self();
         const auto target = layers == 1 ? GL_TEXTURE_2D : GL_TEXTURE_2D_ARRAY;
 
@@ -41,8 +41,13 @@ namespace iris {
         } else {
             glTexImage2D(target, 0, format, width, height, 0, base_format, type, nullptr);
         }
-        glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        if (nearest) {
+            glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        } else {
+            glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        }
         glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
         glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
         const auto color = std::to_array({ 1.0f, 1.0f, 1.0f, 1.0f });

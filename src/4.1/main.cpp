@@ -637,7 +637,7 @@ int main() {
             window.width,
             window.height,
             1,
-            GL_RGBA8,
+            GL_SRGB8_ALPHA8,
             GL_RGBA,
             GL_UNSIGNED_BYTE),
         iris::framebuffer_attachment_t::create(
@@ -787,7 +787,7 @@ int main() {
                     window.width,
                     window.height,
                     1,
-                    GL_RGBA8,
+                    GL_SRGB8_ALPHA8,
                     GL_RGBA,
                     GL_UNSIGNED_BYTE),
                 iris::framebuffer_attachment_t::create(

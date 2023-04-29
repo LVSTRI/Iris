@@ -126,7 +126,6 @@ vec3 sample_shadow(in vec3 shadow_frag_pos, in vec3 ddx_shadow_frag_pos, in vec3
     ddx_shadow_frag_pos *= cascades[cascade].scale.xyz;
     ddy_shadow_frag_pos *= cascades[cascade].scale.xyz;
 
-
     const vec2 shadow_size = vec2(textureSize(shadow_map, 0));
     const vec2 texel_size = 1.0 / shadow_size;
 
@@ -139,8 +138,8 @@ vec3 sample_shadow(in vec3 shadow_frag_pos, in vec3 ddx_shadow_frag_pos, in vec3
     const float light_depth = shadow_frag_pos.z - bias;
     vec3 shadow_factor = vec3(0.0);
     uint sampled_count = 0;
-    for (int x = -2; x <= 2; ++x) {
-        for (int y = -2; y <= 2; ++y) {
+    for (int x = -3; x <= 3; ++x) {
+        for (int y = -3; y <= 3; ++y) {
             const vec2 offset = vec2(x, y);
             const vec2 s_uv = shadow_frag_pos.xy + (offset * texel_size);
             shadow_factor += texture(shadow_map, vec4(s_uv, cascade, light_depth)).r;
@@ -175,12 +174,12 @@ void main() {
         calculate_directional_light(diffuse, specular, n_normal) *
         calculate_shadow(n_normal, cascade);
 
-    switch (cascade) {
-        case 0: color *= vec3(1.0, 0.5, 0.5); break;
-        case 1: color *= vec3(0.5, 1.0, 0.5); break;
-        case 2: color *= vec3(0.5, 0.5, 1.0); break;
-        case 3: color *= vec3(1.0, 1.0, 0.5); break;
-    }
+    /*switch (cascade) {
+        case 0: color *= vec3(1.0, 0.25, 0.25); break;
+        case 1: color *= vec3(0.25, 1.0, 0.25); break;
+        case 2: color *= vec3(0.25, 0.25, 1.0); break;
+        case 3: color *= vec3(1.0, 1.0, 0.25); break;
+    }*/
     out_pixel = vec4(color, alpha);
     out_transform_id = transform_id;
 }

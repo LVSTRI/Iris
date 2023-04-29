@@ -35,7 +35,7 @@ namespace iris {
         texture._channels = channels;
 
         if (channels == 4 && path.extension() == ".png") {
-            for (auto i = 0_i32; i < width * height * channels; i += channels) {
+            for (auto i = 0_u32; i < width * height * channels; i += channels) {
                 if (data[i + 3] != 255) {
                     texture._is_opaque = false;
                     break;
@@ -55,6 +55,7 @@ namespace iris {
         }
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, 16.0f);
 
         const auto internal_format = type == texture_type_t::linear_srgb ? GL_RGBA8 : GL_SRGB8_ALPHA8;
         glTexImage2D(GL_TEXTURE_2D, 0, internal_format, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
