@@ -1,4 +1,5 @@
 #version 460 core
+#define CASCADE_COUNT 4
 
 struct material_t {
     sampler2D diffuse;
@@ -22,10 +23,13 @@ struct point_light_t {
     float quadratic;
 };
 
-struct shadow_frustum_t {
+struct cascade_data_t {
     mat4 projection;
     mat4 view;
-    vec4 partitions;
+    mat4 pv;
+    mat4 global;
+    vec4 scale;
+    vec4 offset; // w is split
 };
 
 layout (location = 0) in vec3 frag_pos;
@@ -48,8 +52,8 @@ layout (std140, binding = 0) uniform camera_uniform_t {
     vec3 position;
 } camera;
 
-layout (std430, binding = 2) readonly restrict buffer shadow_camera_buffer_t {
-    shadow_frustum_t[] shadow_frustums;
+layout (std430, binding = 2) readonly restrict buffer cascade_output_t {
+    cascade_data_t[CASCADE_COUNT] cascades;
 };
 
 layout (std140, binding = 3) readonly restrict buffer point_light_uniform_t {
@@ -61,9 +65,9 @@ layout (std140, binding = 4) uniform directional_light_uniform_t {
 };
 
 uint calculate_cascade() {
-    const float dist = abs((camera.view * vec4(frag_pos, 1.0)).z);
+    const float dist = abs((camera.projection * camera.view * vec4(frag_pos, 1.0)).w);
     for (uint i = 0; i < num_cascades; ++i) {
-        if (dist < shadow_frustums[i].partitions[1]) {
+        if (dist < cascades[i].offset.w) {
             return i;
         }
     }
@@ -109,7 +113,7 @@ vec3 calculate_directional_light(vec3 diffuse_color, vec3 specular_color, vec3 n
 }
 
 float calculate_shadow(vec3 normal, uint cascade) {
-    const vec3 frag_pos_shadow = vec3(shadow_frustums[cascade].projection * shadow_frustums[cascade].view * vec4(frag_pos, 1.0));
+    const vec3 frag_pos_shadow = vec3(cascades[cascade].projection * cascades[cascade].view * vec4(frag_pos, 1.0));
     const vec3 proj_coords = frag_pos_shadow.xyz * 0.5 + 0.5;
     if (proj_coords.z > 1.0) {
         return 1.0;
@@ -145,6 +149,44 @@ float calculate_shadow(vec3 normal, uint cascade) {
     return sampled_depth / 16.0;
 }
 
+vec3 sample_shadow(in vec3 shadow_frag_pos, in vec3 ddx_shadow_frag_pos, in vec3 ddy_shadow_frag_pos, in vec3 normal, in uint cascade) {
+    //shadow_frag_pos.xyz = shadow_frag_pos.xyz * 0.5 + 0.5;
+    shadow_frag_pos += cascades[cascade].offset.xyz;
+    shadow_frag_pos *= cascades[cascade].scale.xyz;
+    ddx_shadow_frag_pos *= cascades[cascade].scale.xyz;
+    ddy_shadow_frag_pos *= cascades[cascade].scale.xyz;
+
+    const vec2 shadow_size = vec2(textureSize(shadow_map, 0));
+    const vec2 texel_size = 0.25 / shadow_size;
+
+    const vec3 n_light_dir = normalize(dir_light.direction);
+    const float n_dot_l = dot(normal, n_light_dir);
+    const float width = 0.00025;
+    const float bias = clamp((width / 2.0) * tan(acos(clamp(n_dot_l, -1.0, 1.0))), 0.0, width);
+    const float light_depth = shadow_frag_pos.z - bias;
+    vec3 shadow_factor = vec3(0.0);
+    uint sampled_count = 0;
+    for (int x = -4; x <= 4; ++x) {
+        for (int y = -4; y <= 4; ++y) {
+            const vec2 offset = vec2(x, y);
+            const vec2 s_uv = shadow_frag_pos.xy + (offset * texel_size);
+            const float closest = texture(shadow_map, vec3(s_uv, cascade)).r;
+            const float current = light_depth;
+            shadow_factor += vec3(1.0 - float(current > closest));
+            ++sampled_count;
+        }
+    }
+    return shadow_factor / sampled_count;
+}
+
+vec3 calculate_shadow_2(in vec3 normal, in uint cascade) {
+    /*const uvec2 screen_xy = uvec2(gl_FragCoord.xy);*/
+    const vec3 shadow_frag_pos = vec3(cascades[cascade].global * vec4(frag_pos, 1.0));
+    const vec3 ddx_shadow_frag_pos = dFdxFine(shadow_frag_pos);
+    const vec3 ddy_shadow_frag_pos = dFdyFine(shadow_frag_pos);
+    return sample_shadow(shadow_frag_pos, ddx_shadow_frag_pos, ddy_shadow_frag_pos, normal, cascade);
+}
+
 void main() {
     const float ambient_factor = 0.025;
     const vec3 diffuse = texture(material.diffuse, uv).rgb;
@@ -161,8 +203,14 @@ void main() {
 
     color +=
         calculate_directional_light(diffuse, specular, n_normal) *
-        calculate_shadow(n_normal, cascade);
+        calculate_shadow_2(n_normal, cascade);
 
+    switch (cascade) {
+        case 0: color *= vec3(1.0, 0.5, 0.5); break;
+        case 1: color *= vec3(0.5, 1.0, 0.5); break;
+        case 2: color *= vec3(0.5, 0.5, 1.0); break;
+        case 3: color *= vec3(1.0, 1.0, 0.5); break;
+    }
     out_pixel = vec4(color, alpha);
     out_transform_id = transform_id;
 }

@@ -1,0 +1,199 @@
+#version 460 core
+#define CASCADE_COUNT 4
+
+struct cascade_data_t {
+    mat4 projection;
+    mat4 view;
+    mat4 pv;
+    mat4 global;
+    vec4 scale;
+    vec4 offset; // w is split
+};
+
+layout (local_size_x = CASCADE_COUNT, local_size_y = 1, local_size_z = 1) in;
+
+layout (binding = 0, rg32f) uniform readonly restrict image2D depth;
+
+layout (std140, binding = 1) uniform cascade_setup_data_t {
+    mat4 global_shadow_pv;
+    mat4 inv_pv;
+    vec4 camera_right;
+    vec4 light_dir;
+    float near;
+    float far;
+    float resolution;
+} setup_data;
+
+layout (std430, binding = 2) writeonly restrict buffer cascade_output_t {
+    cascade_data_t[CASCADE_COUNT] cascades;
+};
+
+mat4 mat4_identity() {
+    mat4 m = mat4(0.0);
+    m[0][0] = 1.0;
+    m[1][1] = 1.0;
+    m[2][2] = 1.0;
+    m[3][3] = 1.0;
+    return m;
+}
+
+mat4 mat4_make_ortho(in float left, in float right, in float bottom, in float top, in float near, in float far) {
+    mat4 m = mat4_identity();
+    m[0][0] = 2.0 / (right - left);
+    m[1][1] = 2.0 / (top - bottom);
+    m[2][2] = -2.0 / (far - near);
+    m[3][0] = -(right + left) / (right - left);
+    m[3][1] = -(top + bottom) / (top - bottom);
+    m[3][2] = -(far + near) / (far - near);
+    return m;
+}
+
+mat4 mat4_make_view(in vec3 eye, in vec3 center, in vec3 up) {
+    mat4 m = mat4_identity();
+    vec3 f = normalize(center - eye);
+    vec3 s = normalize(cross(f, up));
+    vec3 u = cross(s, f);
+    m[0][0] = s.x;
+    m[1][0] = s.y;
+    m[2][0] = s.z;
+    m[0][1] = u.x;
+    m[1][1] = u.y;
+    m[2][1] = u.z;
+    m[0][2] = -f.x;
+    m[1][2] = -f.y;
+    m[2][2] = -f.z;
+    m[3][0] = -dot(s, eye);
+    m[3][1] = -dot(u, eye);
+    m[3][2] = dot(f, eye);
+    return m;
+}
+
+// based on the algorithm from
+//   - https://github.com/TheRealMJP/Shadows;
+//   - https://johanmedestrom.wordpress.com/2016/03/18/opengl-cascaded-shadow-maps/
+void main() {
+    // linearize Z
+    const float near_clip = setup_data.near;
+    const float far_clip = setup_data.far;
+
+    // ignore this for now
+    vec2 reduction_depth = imageLoad(depth, ivec2(0)).rg;
+    reduction_depth = reduction_depth * 2.0 - 1.0;
+    reduction_depth = (2.0 * near_clip * far_clip) / (far_clip + near_clip - reduction_depth * (far_clip - near_clip));
+    reduction_depth = clamp(reduction_depth * 0.5 + 0.5, 0.0, 1.0);
+
+    const float min_depth = 0.0;
+    const float max_depth = 1.0;
+
+    float[] cascade_splits = float[CASCADE_COUNT](0.0);
+    // PSSM
+    {
+        const float lambda = 0.95;
+
+        const float clip_range = far_clip - near_clip;
+        const float min_z = near_clip + min_depth * clip_range;
+        const float max_z = near_clip + max_depth * clip_range;
+        const float range = max_z - min_z;
+        const float ratio = max_z / min_z;
+
+        for (uint i = 0; i < CASCADE_COUNT; ++i) {
+            const float p = (i + 1) / float(CASCADE_COUNT);
+            const float s_log = min_z * pow(abs(ratio), p);
+            const float s_uniform = min_z + range * p;
+            const float d = lambda * (s_log - s_uniform) + s_uniform;
+            cascade_splits[i] = (d - near_clip) / clip_range;
+        }
+    }
+
+    const uint cascade_index = gl_LocalInvocationID.x;
+    vec3[] frustum_corners = vec3[](
+        vec3(-1.0, -1.0, -1.0),
+        vec3( 1.0, -1.0, -1.0),
+        vec3(-1.0,  1.0, -1.0),
+        vec3( 1.0,  1.0, -1.0),
+        vec3(-1.0, -1.0,  1.0),
+        vec3( 1.0, -1.0,  1.0),
+        vec3(-1.0,  1.0,  1.0),
+        vec3( 1.0,  1.0,  1.0));
+
+    const float prev_split = cascade_index == 0 ? min_depth : cascade_splits[cascade_index - 1];
+    const float curr_split = cascade_splits[cascade_index];
+
+    for (uint i = 0; i < 8; ++i) {
+        const vec4 corner = setup_data.inv_pv * vec4(frustum_corners[i], 1.0);
+        frustum_corners[i] = corner.xyz / corner.w;
+    }
+
+    for (uint i = 0; i < 4; ++i) {
+        const vec3 corner_ray = frustum_corners[i + 4] - frustum_corners[i];
+        const vec3 near_corner_ray = prev_split * corner_ray;
+        const vec3 far_corner_ray = curr_split * corner_ray;
+        frustum_corners[i + 4] = frustum_corners[i] + far_corner_ray;
+        frustum_corners[i] = frustum_corners[i] + near_corner_ray;
+    }
+
+    vec3 frustum_center = vec3(0.0);
+    for (uint i = 0; i < 8; ++i) {
+        frustum_center += frustum_corners[i];
+    }
+    frustum_center /= 8.0;
+
+    const vec3 up = vec3(0.0, 1.0, 0.0);
+    const vec3 light_dir = vec3(setup_data.light_dir);
+
+    vec3 min_ext = vec3(0.0);
+    vec3 max_ext = vec3(0.0);
+    float r_sphere = 0.0;
+    for (uint i = 0; i < 8; ++i) {
+        r_sphere = max(r_sphere, length(frustum_corners[i] - frustum_center));
+    }
+    r_sphere = ceil(r_sphere * 16.0) / 16.0;
+    min_ext = vec3(-r_sphere);
+    max_ext = vec3(r_sphere);
+
+    const vec3 cascade_ext = max_ext - min_ext;
+    // push "back" the light source
+    const vec3 shadow_cam_pos = frustum_center + light_dir * -min_ext.z;
+
+    mat4 light_view = mat4_make_view(shadow_cam_pos, frustum_center, up);
+    mat4 light_proj = mat4_make_ortho(min_ext.x, max_ext.x, min_ext.y, max_ext.y, 0.0, cascade_ext.z);
+
+    // stabilize
+    {
+        const mat4 shadow_pv = light_proj * light_view;
+        vec3 shadow_origin = vec3(0.0);
+        shadow_origin = (shadow_pv * vec4(shadow_origin, 1.0)).xyz;
+        shadow_origin *= setup_data.resolution / 2.0;
+        const vec3 rounded_origin = round(shadow_origin);
+        vec3 round_offset = rounded_origin - shadow_origin;
+        round_offset *= 2.0 / setup_data.resolution;
+        light_proj[3][0] += round_offset.x;
+        light_proj[3][1] += round_offset.y;
+    }
+    const mat4 light_pv = light_proj * light_view;
+    cascades[cascade_index].projection = light_proj;
+    cascades[cascade_index].view = light_view;
+    cascades[cascade_index].pv = light_pv;
+
+    const float clip_dist = far_clip - near_clip;
+    cascades[cascade_index].offset.w = near_clip + curr_split * clip_dist;
+
+    mat4 tx_scale_bias = mat4(
+        vec4(0.5, 0.0, 0.0, 0.0),
+        vec4(0.0, 0.5, 0.0, 0.0),
+        vec4(0.0, 0.0, 0.5, 0.0),
+        vec4(0.5, 0.5, 0.5, 1.0));
+    const mat4 inv_cascade = inverse(tx_scale_bias * (light_proj * light_view));
+    const mat4 global_pv = setup_data.global_shadow_pv;
+    vec3[] cascade_corners = vec3[](
+        vec3(inv_cascade * vec4(0.0, 0.0, 0.0, 1.0)),
+        vec3(inv_cascade * vec4(1.0, 1.0, 1.0, 1.0)));
+    cascade_corners[0] = vec3(global_pv * vec4(cascade_corners[0], 1.0));
+    cascade_corners[1] = vec3(global_pv * vec4(cascade_corners[1], 1.0));
+
+    const vec3 cascade_scale = 1.0 / (cascade_corners[1] - cascade_corners[0]);
+
+    cascades[cascade_index].global = global_pv;
+    cascades[cascade_index].offset.xyz = vec3(-cascade_corners[0]);
+    cascades[cascade_index].scale.xyz = cascade_scale;
+}

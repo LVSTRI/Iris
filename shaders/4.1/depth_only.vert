@@ -1,4 +1,5 @@
 #version 460 core
+
 invariant gl_Position;
 
 struct transform_data_t {

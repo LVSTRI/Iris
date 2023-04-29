@@ -29,6 +29,8 @@
 
 #include <stb_image.h>
 
+#define CASCADE_COUNT 4
+
 using namespace iris::literals;
 
 constexpr auto WINDOW_WIDTH = 800;
@@ -61,6 +63,25 @@ struct directional_light_t {
     iris::float32 _pad1 = 0;
     glm::vec3 specular = {};
     iris::float32 _pad2 = 0;
+};
+
+struct cascade_setup_data_t {
+    glm::mat4 global_shadow_pv = {};
+    glm::mat4 inv_pv = {};
+    glm::vec4 camera_right = {};
+    glm::vec4 light_dir = {};
+    iris::float32 near = {};
+    iris::float32 far = {};
+    iris::float32 shadow_size = {};
+};
+
+struct cascade_data_t {
+    glm::mat4 projection;
+    glm::mat4 view;
+    glm::mat4 pv;
+    glm::mat4 global;
+    glm::vec4 scale;
+    glm::vec4 offset; // w is split
 };
 
 static auto generate_cube() noexcept {
@@ -115,23 +136,17 @@ struct scene_t {
     std::vector<mesh_ref_t> meshes;
 };
 
-struct shadow_frustum_t {
-    glm::mat4 projection = {};
-    glm::mat4 view = {};
-    glm::vec4 partitions = {};
-};
-
-static auto calculate_shadow_frustum(const iris::camera_t& camera, const glm::vec3 light_dir) noexcept -> std::vector<shadow_frustum_t> {
+static auto calculate_shadow_frustum(const iris::camera_t& camera, const glm::vec3 light_dir) noexcept -> std::pair<std::vector<cascade_data_t>, glm::mat4> {
     const auto partition = [&](iris::float32 near, iris::float32 far) {
-        auto shadow_frustum = shadow_frustum_t();
+        auto shadow_frustum = cascade_data_t();
         const auto ndc_cube = std::to_array({
             glm::vec3(-1.0f, -1.0f, -1.0f),
-            glm::vec3(-1.0f, -1.0f,  1.0f),
-            glm::vec3(-1.0f,  1.0f, -1.0f),
-            glm::vec3(-1.0f,  1.0f,  1.0f),
             glm::vec3( 1.0f, -1.0f, -1.0f),
-            glm::vec3( 1.0f, -1.0f,  1.0f),
+            glm::vec3(-1.0f,  1.0f, -1.0f),
             glm::vec3( 1.0f,  1.0f, -1.0f),
+            glm::vec3(-1.0f, -1.0f,  1.0f),
+            glm::vec3( 1.0f, -1.0f,  1.0f),
+            glm::vec3(-1.0f,  1.0f,  1.0f),
             glm::vec3( 1.0f,  1.0f,  1.0f),
         });
 
@@ -153,7 +168,7 @@ static auto calculate_shadow_frustum(const iris::camera_t& camera, const glm::ve
         center /= world_points.size();
 
         // world -> light view space
-        const auto light_view = glm::lookAt(center + glm::normalize(light_dir), center, glm::vec3(0.0f, 1.0f, 0.0f));
+        const auto light_view = glm::lookAt(center + light_dir * 0.5f, center, glm::vec3(0.0f, 1.0f, 0.0f));
 
         // calculate frustum bounding box in light view space
         auto min = glm::vec3(std::numeric_limits<iris::float32>::max());
@@ -177,15 +192,187 @@ static auto calculate_shadow_frustum(const iris::camera_t& camera, const glm::ve
         // light projection
         shadow_frustum.projection = glm::ortho(min.x, max.x, min.y, max.y, min.z, max.z);
         shadow_frustum.view = light_view;
-        shadow_frustum.partitions = { near, far, 0.0f, 0.0f };
+        shadow_frustum.pv = shadow_frustum.projection * shadow_frustum.view;
+        shadow_frustum.offset = { 0.0f, 0.0f, near, far };
 
         return shadow_frustum;
     };
-    return {
+    const auto make_global_matrix = [&]() {
+        auto shadow_frustum = cascade_data_t();
+        const auto ndc_cube = std::to_array({
+            glm::vec3(-1.0f, -1.0f, -1.0f),
+            glm::vec3( 1.0f, -1.0f, -1.0f),
+            glm::vec3(-1.0f,  1.0f, -1.0f),
+            glm::vec3( 1.0f,  1.0f, -1.0f),
+            glm::vec3(-1.0f, -1.0f,  1.0f),
+            glm::vec3( 1.0f, -1.0f,  1.0f),
+            glm::vec3(-1.0f,  1.0f,  1.0f),
+            glm::vec3( 1.0f,  1.0f,  1.0f),
+        });
+
+        const auto inv_pv = glm::inverse(camera.projection() * camera.view());
+
+        auto frustum_center = glm::vec3(0.0f);
+        auto world_points = std::vector<glm::vec3>();
+        world_points.reserve(ndc_cube.size());
+        for (const auto& point : ndc_cube) {
+            auto world_point = inv_pv * glm::vec4(point, 1.0f);
+            world_point /= world_point.w;
+            world_points.emplace_back(world_point);
+            frustum_center += glm::vec3(world_point);
+        }
+        frustum_center /= 8.0f;
+
+        auto min_ext = glm::vec3(std::numeric_limits<iris::float32>::max());
+        auto max_ext = glm::vec3(std::numeric_limits<iris::float32>::lowest());
+        for (auto i = 0_u32; i < 8; ++i) {
+            min_ext = glm::vec3(std::min(min_ext.x, world_points[i].x));
+            min_ext = glm::vec3(std::min(min_ext.y, world_points[i].y));
+            min_ext = glm::vec3(std::min(min_ext.z, world_points[i].z));
+            max_ext = glm::vec3(std::max(max_ext.x, world_points[i].x));
+            max_ext = glm::vec3(std::max(max_ext.y, world_points[i].y));
+            max_ext = glm::vec3(std::max(max_ext.z, world_points[i].z));
+        }
+        shadow_frustum.projection = glm::ortho(min_ext.x, max_ext.x, min_ext.y, max_ext.y, 0.0f, 1.0f);
+        shadow_frustum.view = glm::lookAt(frustum_center + light_dir * 0.5f, frustum_center, glm::vec3(0.0f, 1.0f, 0.0f));
+        shadow_frustum.pv = shadow_frustum.projection * shadow_frustum.view;
+        return shadow_frustum;
+    };
+    const auto global = make_global_matrix();
+    const auto uv_scale_bias = glm::mat4(
+        glm::vec4(0.5f, 0.0f, 0.0f, 0.0f),
+        glm::vec4(0.0f, 0.5f, 0.0f, 0.0f),
+        glm::vec4(0.0f, 0.0f, 0.5f, 0.0f),
+        glm::vec4(0.5f, 0.5f, 0.5f, 1.0f));
+    return std::make_pair(std::vector{
         partition(camera.near(), 5.0f),
         partition(5.0f, 10.0f),
         partition(10.0f, 20.0f),
         partition(20.0f, camera.far()),
+    }, uv_scale_bias * global.pv);
+}
+
+static auto calculate_pssm_cascades(const iris::camera_t& camera, const glm::mat4& global_pv, glm::vec3 light_dir, iris::float32 resolution) noexcept -> std::vector<cascade_data_t> {
+    const auto partition = [&](iris::uint32 cascade_index) {
+        const auto near_clip = camera.near();
+        const auto far_clip = camera.far();
+
+        const auto min_depth = 0.0f;
+        const auto max_depth = 1.0f;
+
+        auto cascade_splits = std::to_array<iris::float32, CASCADE_COUNT>({});
+        {
+            const auto lambda = 1.0f;
+            const auto clip_range = far_clip - near_clip;
+            const auto min_z = near_clip + min_depth * clip_range;
+            const auto max_z = near_clip + max_depth * clip_range;
+            const auto range = max_z - min_z;
+            const auto ratio = max_z / min_z;
+
+            for (auto i = 0_u32; i < CASCADE_COUNT; ++i) {
+                const auto p = (i + 1) / static_cast<iris::float32>(CASCADE_COUNT);
+                const auto s_log = min_z * glm::pow(ratio, p);
+                const auto s_uniform = min_z + range * p;
+                const auto d = lambda * (s_log - s_uniform) + s_uniform;
+                cascade_splits[i] = (d - near_clip) / clip_range;
+            }
+        }
+
+        auto frustum_corners = std::to_array({
+            glm::vec3(-1.0f, -1.0f, -1.0f),
+            glm::vec3( 1.0f, -1.0f, -1.0f),
+            glm::vec3(-1.0f,  1.0f, -1.0f),
+            glm::vec3( 1.0f,  1.0f, -1.0f),
+            glm::vec3(-1.0f, -1.0f,  1.0f),
+            glm::vec3( 1.0f, -1.0f,  1.0f),
+            glm::vec3(-1.0f,  1.0f,  1.0f),
+            glm::vec3( 1.0f,  1.0f,  1.0f),
+        });
+
+        const auto prev_split = cascade_index == 0 ? min_depth : cascade_splits[cascade_index - 1];
+        const auto curr_split = cascade_splits[cascade_index];
+        const auto inv_pv = glm::inverse(camera.projection() * camera.view());
+        for (auto i = 0_u32; i < 8; ++i) {
+            const auto corner = inv_pv * glm::vec4(frustum_corners[i], 1.0f);
+            frustum_corners[i] = corner / corner.w;
+        }
+
+        for (auto i = 0_u32; i < 4; ++i) {
+            const auto corner_ray = frustum_corners[i + 4] - frustum_corners[i];
+            frustum_corners[i + 4] = frustum_corners[i] + (corner_ray * prev_split);
+            frustum_corners[i] = frustum_corners[i] + (corner_ray * curr_split);
+        }
+
+        auto frustum_center = glm::vec3(0.0f);
+        for (auto i = 0_u32; i < 8; ++i) {
+            frustum_center += frustum_corners[i];
+        }
+        frustum_center /= 8.0f;
+
+        const auto d_up = glm::vec3(0.0f, 1.0f, 0.0f);
+
+        auto min_ext = glm::vec3(0.0f);
+        auto max_ext = glm::vec3(0.0f);
+        auto r_sphere = 0.0f;
+        for (auto i = 0_u32; i < 8; ++i) {
+            r_sphere = glm::max(r_sphere, glm::length(frustum_corners[i] - frustum_center));
+        }
+        max_ext = glm::vec3(r_sphere);
+        min_ext = -max_ext;
+
+        const auto cascade_ext = max_ext - min_ext;
+        const auto light_cam_pos = frustum_center + light_dir * -min_ext.z;
+        auto light_view = glm::lookAt(light_cam_pos, frustum_center, d_up);
+        auto light_proj = glm::ortho(min_ext.x, max_ext.x, min_ext.y, max_ext.y, 0.0f, cascade_ext.z);
+
+        // stabilize
+        {
+            const auto light_pv = light_proj * light_view;
+            auto shadow_origin = glm::vec3(0.0f);
+            shadow_origin = glm::vec3(light_pv * glm::vec4(shadow_origin, 1.0));
+            shadow_origin *= resolution / 2.0;
+            const auto rounded_origin = glm::round(shadow_origin);
+            auto round_offset = rounded_origin - shadow_origin;
+            round_offset *= 2.0 / resolution;
+            light_proj[3][0] += round_offset.x;
+            light_proj[3][1] += round_offset.y;
+        }
+        const auto light_pv = light_proj * light_view;
+
+        auto cascade_data = cascade_data_t();
+        cascade_data.projection = light_proj;
+        cascade_data.view = light_view;
+        cascade_data.pv = light_pv;
+
+        const auto clip_dist = far_clip - near_clip;
+
+        auto uv_scale_bias = glm::mat4(
+            glm::vec4(0.5f, 0.0f, 0.0f, 0.0f),
+            glm::vec4(0.0f, 0.5f, 0.0f, 0.0f),
+            glm::vec4(0.0f, 0.0f, 0.5f, 0.0f),
+            glm::vec4(0.5f, 0.5f, 0.5f, 1.0f));
+        const auto inv_cascade = glm::inverse(uv_scale_bias * (light_proj * light_view));
+
+        auto cascade_corners = std::to_array({
+            glm::vec3(inv_cascade * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)),
+            glm::vec3(inv_cascade * glm::vec4(1.0f, 1.0f, 1.0f, 1.0f)),
+        });
+        cascade_corners[0] = glm::vec3(global_pv * glm::vec4(cascade_corners[0], 1.0f));
+        cascade_corners[1] = glm::vec3(global_pv * glm::vec4(cascade_corners[1], 1.0f));
+
+        const auto cascade_scale = 1.0f / (cascade_corners[1] - cascade_corners[0]);
+
+        cascade_data.offset = glm::vec4(-cascade_corners[0], near_clip + curr_split * clip_dist);
+        cascade_data.scale = glm::make_vec4(cascade_scale);
+        cascade_data.global = global_pv;
+
+        return cascade_data;
+    };
+    return {
+        partition(0),
+        partition(1),
+        partition(2),
+        partition(3),
     };
 }
 
@@ -310,6 +497,7 @@ int main() {
     auto debug_shadow_shader = iris::shader_t::create("../shaders/4.1/debug_shadow.vert", "../shaders/4.1/debug_shadow.frag");
     auto depth_reduce_init_shader = iris::shader_t::create_compute("../shaders/4.1/depth_reduce_init.comp");
     auto depth_reduce_shader = iris::shader_t::create_compute("../shaders/4.1/depth_reduce.comp");
+    auto setup_shadows_shader = iris::shader_t::create_compute("../shaders/4.1/setup_shadows.comp");
 
     // texture loading
     auto textures = std::vector<iris::texture_t>();
@@ -526,13 +714,14 @@ int main() {
     auto delta_time = 0.0f;
     auto last_frame = 0.0f;
 
-
     // uniform buffers
     auto camera_buffer = iris::buffer_t::create(sizeof(camera_data_t), GL_UNIFORM_BUFFER);
-    auto shadow_camera_buffer = iris::buffer_t::create(sizeof(shadow_frustum_t[4]), GL_SHADER_STORAGE_BUFFER);
+    auto shadow_camera_buffer = iris::buffer_t::create(sizeof(cascade_data_t[4]), GL_SHADER_STORAGE_BUFFER);
     auto model_buffer = iris::buffer_t::create(sizeof(glm::mat4[16384]), GL_SHADER_STORAGE_BUFFER);
     auto point_light_buffer = iris::buffer_t::create(sizeof(point_light_t[32]), GL_SHADER_STORAGE_BUFFER);
     auto dir_light_buffer = iris::buffer_t::create(sizeof(directional_light_t[32]), GL_UNIFORM_BUFFER);
+    auto cascade_setup_buffer = iris::buffer_t::create(sizeof(cascade_setup_data_t), GL_UNIFORM_BUFFER);
+    auto cascade_out_buffer = iris::buffer_t::create(sizeof(cascade_data_t[4]), GL_SHADER_STORAGE_BUFFER);
 
     // depth reduce output
     // yes I know this isn't a framebuffer attachment
@@ -551,6 +740,9 @@ int main() {
 
     // raycasting
     auto hit_mesh = std::optional<std::pair<std::reference_wrapper<const iris::mesh_t>, iris::uint32>>();
+
+    // avoid clipping objects behind the frustum
+    glEnable(GL_DEPTH_CLAMP);
 
     // render loop
     glEnable(GL_SCISSOR_TEST);
@@ -648,13 +840,24 @@ int main() {
         dir_light_sun.direction = glm::vec3(-2.25f * glm::sin(current_time), 35.0f, -6.5f * glm::cos(current_time));
 
         // shadow camera
-        const auto shadow_frustums = calculate_shadow_frustum(camera, glm::normalize(dir_light_sun.direction));
+        const auto [shadow_frustums, global_shadow_pv] = calculate_shadow_frustum(camera, glm::normalize(dir_light_sun.direction));
+
+        const auto cascade_setup = cascade_setup_data_t {
+            global_shadow_pv,
+            glm::inverse(camera.projection() * camera.view()),
+            glm::make_vec4(camera.right()),
+            glm::make_vec4(glm::normalize(dir_light_sun.direction)),
+            camera.near(),
+            camera.far(),
+            static_cast<iris::float32>(f1_shadow_attachments[0].width())
+        };
 
         camera_buffer.write(&camera_data, iris::size_bytes(camera_data));
         shadow_camera_buffer.write(shadow_frustums.data(), iris::size_bytes(shadow_frustums));
         model_buffer.write(transforms.data(), iris::size_bytes(transforms));
         point_light_buffer.write(point_lights.data(), iris::size_bytes(point_lights));
         dir_light_buffer.write(&dir_light_sun, iris::size_bytes(dir_light_sun));
+        cascade_setup_buffer.write(&cascade_setup, iris::size_bytes(cascade_setup));
 
         f0_main.bind();
         glDrawBuffer(GL_NONE);
@@ -681,8 +884,11 @@ int main() {
         f0_main_attachments[2].bind();
         depth_reduce_init_shader
             .bind()
-            .set(0, { 0_i32 });
+            .set(0, { 0_i32 })
+            .set(1, { camera.near() })
+            .set(2, { camera.far() });
         glBindImageTexture(0, depth_reduce_outs[0].id(), 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG32F);
+        camera_buffer.bind_base(1);
         glDispatchCompute(depth_reduce_wgc[0].x, depth_reduce_wgc[0].y, 1);
 
         depth_reduce_shader.bind();
@@ -691,6 +897,14 @@ int main() {
             glBindImageTexture(1, depth_reduce_outs[i].id(), 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG32F);
             glDispatchCompute(depth_reduce_wgc[i].x, depth_reduce_wgc[i].y, 1);
         }
+
+        // setup shadow cascades
+        setup_shadows_shader.bind();
+        f0_main_attachments[2].bind();
+        glBindImageTexture(0, depth_reduce_outs.back().id(), 0, GL_FALSE, 0, GL_READ_ONLY, GL_RG32F);
+        cascade_setup_buffer.bind_base(1);
+        cascade_out_buffer.bind_base(2);
+        glDispatchCompute(1, 1, 1);
 
         {
             const auto draw_attachments = std::to_array<GLenum>({
@@ -702,7 +916,6 @@ int main() {
         }
         // render the shadow map
         f1_shadow.bind();
-        glEnable(GL_DEPTH_TEST);
         glCullFace(GL_FRONT);
         for (auto i = 0_u32; i < shadow_frustums.size(); ++i) {
             f1_shadow.set_layer(0, i);
@@ -716,7 +929,8 @@ int main() {
                     .bind()
                     .set(0, { id })
                     .set(1, { i });
-                shadow_camera_buffer.bind_base(0);
+                cascade_out_buffer.bind_base(0);
+                //shadow_camera_buffer.bind_base(0);
                 model_buffer.bind_base(1);
                 mesh.draw();
             }
@@ -724,16 +938,14 @@ int main() {
 
         // 1. render the frustum lines
         f0_main.bind();
-        glEnable(GL_DEPTH_TEST);
         glScissor(0, 0, window.width, window.height);
         glViewport(0, 0, window.width, window.height);
         const auto clear_color = glm::vec4(0.05f, 0.05f, 0.05f, 1.0f);
         const auto clear_id = glm::uvec4(0xffffffff);
         glClearBufferfv(GL_COLOR, 0, glm::value_ptr(clear_color));
         glClearBufferuiv(GL_COLOR, 1, glm::value_ptr(clear_id));
-
+        glDepthFunc(GL_LEQUAL);
         // debug AABBs
-        glDisable(GL_DEPTH_TEST);
         if (glfwGetKey(window.handle, GLFW_KEY_F) == GLFW_PRESS) {
             auto mesh_id = 0_u32;
             for (const auto& model : models) {
@@ -757,9 +969,7 @@ int main() {
                 }
             }
         }
-        glEnable(GL_DEPTH_TEST);
         glCullFace(GL_BACK);
-        glDepthFunc(GL_EQUAL);
         // 2. render opaque objects
         for (const auto& mesh : scene.opaque_meshes) {
             const auto& u_mesh = mesh.ref.get();
@@ -771,7 +981,8 @@ int main() {
 
             camera_buffer.bind_base(0);
             model_buffer.bind_range(1, 0, iris::size_bytes(transforms));
-            shadow_camera_buffer.bind_base(2);
+            cascade_out_buffer.bind_base(2);
+            //shadow_camera_buffer.bind_base(2);
             point_light_buffer.bind_range(3, 0, iris::size_bytes(point_lights) + 1);
             dir_light_buffer.bind_base(4);
 
@@ -819,7 +1030,8 @@ int main() {
 
             camera_buffer.bind_base(0);
             model_buffer.bind_range(1, 0, iris::size_bytes(transforms));
-            shadow_camera_buffer.bind_base(2);
+            cascade_out_buffer.bind_base(2);
+            //shadow_camera_buffer.bind_base(2);
             point_light_buffer.bind_range(3, 0, iris::size_bytes(point_lights) + 1);
             dir_light_buffer.bind_base(4);
 

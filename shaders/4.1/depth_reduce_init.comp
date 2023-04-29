@@ -6,16 +6,26 @@ layout (local_size_x = INVOCATION_SIZE, local_size_y = INVOCATION_SIZE, local_si
 
 layout (location = 0) uniform sampler2D depth;
 
-layout (rg32f, binding = 0) uniform writeonly image2D out_depth;
+layout (rg32f, binding = 0) uniform restrict writeonly image2D out_depth;
+
+layout (std140, binding = 1) uniform camera_uniform_t {
+    mat4 projection;
+    mat4 view;
+    vec3 position;
+} camera;
+
+layout (location = 1) uniform float near;
+layout (location = 2) uniform float far;
 
 shared vec2 shared_depth[INVOCATION_THREADS];
 
 void main() {
     // load
     const ivec2 position = min(ivec2(gl_GlobalInvocationID.xy), textureSize(depth, 0) - 1);
-    const float depth_sample = texelFetch(depth, position, 0).r;
+    float depth_sample = texelFetch(depth, position, 0).r;
     float c_min = 1.0;
     float c_max = 0.0;
+    // linearize Z
     if (depth_sample < 1.0) {
         c_min = min(c_min, depth_sample);
         c_max = max(c_max, depth_sample);

@@ -4,20 +4,20 @@
 
 layout (local_size_x = INVOCATION_SIZE, local_size_y = INVOCATION_SIZE, local_size_z = 1) in;
 
-layout (rg32f, binding = 0) uniform readonly image2D in_depth;
-layout (rg32f, binding = 1) uniform writeonly image2D out_depth;
+layout (rg32f, binding = 0) uniform restrict readonly image2D in_depth;
+layout (rg32f, binding = 1) uniform restrict writeonly image2D out_depth;
 
 shared vec2 shared_depth[INVOCATION_THREADS];
 
 void main() {
     // load
     const ivec2 position = min(ivec2(gl_GlobalInvocationID.xy), imageSize(in_depth) - 1);
-    const float depth_sample = imageLoad(in_depth, position).r;
-    float c_min = 1.0;
-    float c_max = 0.0;
-    if (depth_sample < 1.0) {
-        c_min = min(c_min, depth_sample);
-        c_max = max(c_max, depth_sample);
+    const vec2 depth_samples = imageLoad(in_depth, position).rg;
+    // linearize Z
+    float c_min = depth_samples.x;
+    float c_max = depth_samples.y;
+    if (c_min == 0) {
+        c_min = 1.0;
     }
     shared_depth[gl_LocalInvocationIndex] = vec2(c_min, c_max);
     barrier();

@@ -1,7 +1,5 @@
 #version 460 core
 
-#define MAX_INSTANCES 1024
-
 struct transform_data_t {
     mat4 model;
     mat4 t_inv_model;
