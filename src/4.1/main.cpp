@@ -665,6 +665,9 @@ int main() {
             GL_DEPTH_COMPONENT,
             GL_FLOAT),
     });
+    f1_shadow_attachments[0].bind();
+    glTexParameteri(f1_shadow_attachments[0].target(), GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+    glTexParameteri(f1_shadow_attachments[0].target(), GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
 
     auto f0_main = iris::framebuffer_t::create({
         std::cref(f0_main_attachments[0]),

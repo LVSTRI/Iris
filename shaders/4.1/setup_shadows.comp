@@ -88,7 +88,7 @@ void main() {
     float[] cascade_splits = float[CASCADE_COUNT](0.0);
     // PSSM
     {
-        const float lambda = 0.95;
+        const float lambda = 0.75;
 
         const float clip_range = far_clip - near_clip;
         const float min_z = near_clip + min_depth * clip_range;

@@ -44,7 +44,7 @@ layout (location = 1) out uint out_transform_id;
 layout (location = 1) uniform uint num_cascades;
 layout (location = 4) uniform material_t material;
 layout (location = 7) uniform uint n_point_lights;
-layout (location = 8) uniform sampler2DArray shadow_map;
+layout (location = 8) uniform sampler2DArrayShadow shadow_map;
 
 layout (std140, binding = 0) uniform camera_uniform_t {
     mat4 projection;
@@ -112,75 +112,46 @@ vec3 calculate_directional_light(vec3 diffuse_color, vec3 specular_color, vec3 n
     return diffuse_result + specular_result;
 }
 
-float calculate_shadow(vec3 normal, uint cascade) {
-    const vec3 frag_pos_shadow = vec3(cascades[cascade].projection * cascades[cascade].view * vec4(frag_pos, 1.0));
-    const vec3 proj_coords = frag_pos_shadow.xyz * 0.5 + 0.5;
-    if (proj_coords.z > 1.0) {
-        return 1.0;
-    }
-    const vec2 texel_size = 1.0 / textureSize(shadow_map, 0).xy;
-    const vec2[] shadow_sampling_offsets = vec2[](
-        vec2(0.0, 0.0),
-        vec2(0.0, 1.0),
-        vec2(1.0, 0.0),
-        vec2(1.0, 1.0),
-        vec2(0.5, 0.0),
-        vec2(0.0, 0.5),
-        vec2(0.5, 0.5),
-        vec2(0.5, 1.0),
-        vec2(1.0, 0.5),
-        vec2(0.25, 0.25),
-        vec2(0.25, 0.75),
-        vec2(0.75, 0.25),
-        vec2(0.75, 0.75),
-        vec2(0.25, 0.5),
-        vec2(0.5, 0.25),
-        vec2(0.75, 0.5));
-    const vec3 n_light_dir = normalize(dir_light.direction);
-    const float width = 0.00025;
-    const float bias = clamp((width / 2.0) * tan(acos(clamp(dot(normal, n_light_dir), -1.0, 1.0))), 0.0, width);
-    float sampled_depth = 0.0;
-    for (uint i = 0; i < 16; ++i) {
-        const vec2 s_uv = proj_coords.xy + shadow_sampling_offsets[i] * texel_size;
-        const float closest = texture(shadow_map, vec3(s_uv, cascade)).r;
-        const float current = proj_coords.z;
-        sampled_depth += 1.0 - float(current - bias > closest);
-    }
-    return sampled_depth / 16.0;
+vec2 calcualte_depth_plane_bias(in vec3 ddx, in vec3 ddy) {
+    vec2 bias_uv = vec2(
+        ddy.y * ddx.z - ddx.y * ddy.z,
+        ddx.x * ddy.z - ddy.x * ddx.z);
+    bias_uv *= 1.0 / ((ddx.x * ddy.y) - (ddx.y * ddy.x));
+    return bias_uv;
 }
 
 vec3 sample_shadow(in vec3 shadow_frag_pos, in vec3 ddx_shadow_frag_pos, in vec3 ddy_shadow_frag_pos, in vec3 normal, in uint cascade) {
-    //shadow_frag_pos.xyz = shadow_frag_pos.xyz * 0.5 + 0.5;
     shadow_frag_pos += cascades[cascade].offset.xyz;
     shadow_frag_pos *= cascades[cascade].scale.xyz;
     ddx_shadow_frag_pos *= cascades[cascade].scale.xyz;
     ddy_shadow_frag_pos *= cascades[cascade].scale.xyz;
 
+
     const vec2 shadow_size = vec2(textureSize(shadow_map, 0));
-    const vec2 texel_size = 0.25 / shadow_size;
+    const vec2 texel_size = 1.0 / shadow_size;
+
+    const float plane_bias = min(dot(vec2(1.0) * texel_size, abs(calcualte_depth_plane_bias(ddx_shadow_frag_pos, ddy_shadow_frag_pos))), 0.01);
 
     const vec3 n_light_dir = normalize(dir_light.direction);
     const float n_dot_l = dot(normal, n_light_dir);
-    const float width = 0.00025;
+    const float width = plane_bias * (1 / (8.0 * float(cascade + 1)));
     const float bias = clamp((width / 2.0) * tan(acos(clamp(n_dot_l, -1.0, 1.0))), 0.0, width);
     const float light_depth = shadow_frag_pos.z - bias;
+    const vec2 sampling_texel_size = 1.0 / shadow_size;
     vec3 shadow_factor = vec3(0.0);
     uint sampled_count = 0;
-    for (int x = -4; x <= 4; ++x) {
-        for (int y = -4; y <= 4; ++y) {
+    for (int x = -1; x <= 1; ++x) {
+        for (int y = -1; y <= 1; ++y) {
             const vec2 offset = vec2(x, y);
-            const vec2 s_uv = shadow_frag_pos.xy + (offset * texel_size);
-            const float closest = texture(shadow_map, vec3(s_uv, cascade)).r;
-            const float current = light_depth;
-            shadow_factor += vec3(1.0 - float(current > closest));
+            const vec2 s_uv = shadow_frag_pos.xy + (offset * sampling_texel_size);
+            shadow_factor += texture(shadow_map, vec4(s_uv, cascade, light_depth)).r;
             ++sampled_count;
         }
     }
     return shadow_factor / sampled_count;
 }
 
-vec3 calculate_shadow_2(in vec3 normal, in uint cascade) {
-    /*const uvec2 screen_xy = uvec2(gl_FragCoord.xy);*/
+vec3 calculate_shadow(in vec3 normal, in uint cascade) {
     const vec3 shadow_frag_pos = vec3(cascades[cascade].global * vec4(frag_pos, 1.0));
     const vec3 ddx_shadow_frag_pos = dFdxFine(shadow_frag_pos);
     const vec3 ddy_shadow_frag_pos = dFdyFine(shadow_frag_pos);
@@ -203,14 +174,14 @@ void main() {
 
     color +=
         calculate_directional_light(diffuse, specular, n_normal) *
-        calculate_shadow_2(n_normal, cascade);
+        calculate_shadow(n_normal, cascade);
 
-    switch (cascade) {
+    /*switch (cascade) {
         case 0: color *= vec3(1.0, 0.5, 0.5); break;
         case 1: color *= vec3(0.5, 1.0, 0.5); break;
         case 2: color *= vec3(0.5, 0.5, 1.0); break;
         case 3: color *= vec3(1.0, 1.0, 0.5); break;
-    }
+    }*/
     out_pixel = vec4(color, alpha);
     out_transform_id = transform_id;
 }
