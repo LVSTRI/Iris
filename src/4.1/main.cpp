@@ -658,8 +658,8 @@ int main() {
 
     auto f1_shadow_attachments = std::to_array({
         iris::framebuffer_attachment_t::create(
-            2048,
-            2048,
+            4096,
+            4096,
             4,
             GL_DEPTH_COMPONENT32F,
             GL_DEPTH_COMPONENT,

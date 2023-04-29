@@ -137,13 +137,12 @@ vec3 sample_shadow(in vec3 shadow_frag_pos, in vec3 ddx_shadow_frag_pos, in vec3
     const float width = plane_bias * (1 / (8.0 * float(cascade + 1)));
     const float bias = clamp((width / 2.0) * tan(acos(clamp(n_dot_l, -1.0, 1.0))), 0.0, width);
     const float light_depth = shadow_frag_pos.z - bias;
-    const vec2 sampling_texel_size = 1.0 / shadow_size;
     vec3 shadow_factor = vec3(0.0);
     uint sampled_count = 0;
-    for (int x = -1; x <= 1; ++x) {
-        for (int y = -1; y <= 1; ++y) {
+    for (int x = -2; x <= 2; ++x) {
+        for (int y = -2; y <= 2; ++y) {
             const vec2 offset = vec2(x, y);
-            const vec2 s_uv = shadow_frag_pos.xy + (offset * sampling_texel_size);
+            const vec2 s_uv = shadow_frag_pos.xy + (offset * texel_size);
             shadow_factor += texture(shadow_map, vec4(s_uv, cascade, light_depth)).r;
             ++sampled_count;
         }
