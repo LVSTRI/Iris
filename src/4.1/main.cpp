@@ -40,6 +40,8 @@ struct camera_data_t {
     glm::mat4 projection;
     glm::mat4 view;
     glm::vec3 position;
+    iris::float32 near;
+    iris::float32 far;
 };
 
 struct point_light_t {
@@ -396,12 +398,22 @@ int main() {
     // models.emplace_back(iris::model_t::create("../models/deccer-cubes/SM_Deccer_Cubes_Textured.gltf"));
     // models.emplace_back(iris::model_t::create("../models/San_Miguel/san-miguel.obj"));
     models.emplace_back(iris::model_t::create("../models/sponza/Sponza.gltf"));
+    // models.emplace_back(iris::model_t::create("../models/bistro/bistro.gltf"));
+    // models.emplace_back(iris::model_t::create("../models/rungholt/rungholt.obj"));
     // models.emplace_back(iris::model_t::create("../models/chess/ABeautifulGame.gltf"));
 
+    auto local_transforms = std::vector<glm::mat4>();
+    local_transforms.emplace_back(glm::identity<glm::mat4>());
+
     auto transforms = std::vector<std::array<glm::mat4, 2>>();
-    for (const auto& model : models) {
-        for (const auto& mesh : model.meshes()) {
-            transforms.emplace_back(std::to_array({ mesh.transform(), glm::inverseTranspose(mesh.transform())} ));
+    {
+        for (auto model_id = 0_u32; const auto& model : models) {
+            for (const auto& mesh : model.meshes()) {
+                auto transform = mesh.transform();
+                transform = local_transforms[model_id] * transform;
+                transforms.emplace_back(std::to_array({ transform, glm::inverseTranspose(transform) }));
+            }
+            model_id++;
         }
     }
 
@@ -720,7 +732,9 @@ int main() {
         auto camera_data = camera_data_t {
             camera.projection(),
             camera.view(),
-            camera.position()
+            camera.position(),
+            camera.near(),
+            camera.far(),
         };
 
         // shadow camera
@@ -838,7 +852,7 @@ int main() {
         f0_main.bind();
         glScissor(0, 0, window.width, window.height);
         glViewport(0, 0, window.width, window.height);
-        const auto clear_color = glm::vec4(0.05f, 0.05f, 0.05f, 1.0f);
+        const auto clear_color = glm::vec4(0.01f, 0.01f, 0.01f, 1.0f);
         const auto clear_id = glm::uvec4(0xffffffff);
         glClearBufferfv(GL_COLOR, 0, glm::value_ptr(clear_color));
         glClearBufferuiv(GL_COLOR, 1, glm::value_ptr(clear_id));

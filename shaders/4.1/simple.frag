@@ -1,6 +1,12 @@
 #version 460 core
 #define CASCADE_COUNT 4
 
+#define M_PI 3.1415926535897932384626433832795
+
+#define SHADOW_MODE_SOFT 0
+#define SHADOW_MODE_HARD
+#define SHADOW_MODE SHADOW_MODE_SOFT
+
 struct material_t {
     sampler2D diffuse;
     sampler2D specular;
@@ -116,6 +122,8 @@ layout (std140, binding = 0) uniform camera_uniform_t {
     mat4 projection;
     mat4 view;
     vec3 position;
+    float near;
+    float far;
 } camera;
 
 layout (std430, binding = 2) readonly restrict buffer cascade_output_t {
@@ -202,7 +210,7 @@ vec2 calcualte_depth_plane_bias(in vec3 ddx, in vec3 ddy) {
     return bias_uv;
 }
 
-vec3 sample_shadow(in vec3 shadow_frag_pos, in vec3 ddx_shadow_frag_pos, in vec3 ddy_shadow_frag_pos, in vec3 normal, in uint cascade) {
+vec3 sample_shadow(in vec3 shadow_frag_pos, in vec3 ddx_shadow_frag_pos, in vec3 ddy_shadow_frag_pos, in vec3 normal, in float depth_vs, in uint cascade) {
     shadow_frag_pos += cascades[cascade].offset.xyz;
     shadow_frag_pos *= cascades[cascade].scale.xyz;
     ddx_shadow_frag_pos *= cascades[cascade].scale.xyz;
@@ -210,28 +218,29 @@ vec3 sample_shadow(in vec3 shadow_frag_pos, in vec3 ddx_shadow_frag_pos, in vec3
 
     const vec2 shadow_size = vec2(textureSize(shadow_map, 0));
     const vec2 texel_size = 1.0 / shadow_size;
-    const vec2 scaled_texel_size = 3.0 / shadow_size;
 
     const vec2 bias_uv = calcualte_depth_plane_bias(ddx_shadow_frag_pos, ddy_shadow_frag_pos);
-    const float plane_bias = min(dot(vec2(1.0) * texel_size, abs(bias_uv)), 0.01);
+    const float plane_bias = min(dot(vec2(1.0) * texel_size, abs(bias_uv)), 0.005);
     const vec3 n_light_dir = normalize(dir_light.direction);
     const float n_dot_l = dot(normal, n_light_dir);
-    const float bias = clamp((plane_bias / 2.0) * tan(acos(clamp(n_dot_l, -1.0, 1.0))), 0.0, plane_bias);
-    const float light_depth = shadow_frag_pos.z - (bias * (1 / (8.0 * float(cascade + 1))));
-    const uint sampled_count = 64;
+    float bias = clamp((plane_bias / 2.0) * tan(acos(clamp(n_dot_l, -1.0, 1.0))), 0.0, plane_bias);
+    bias = bias * (1 / (8.0 * float(cascade + 1)));
+    const float light_depth = shadow_frag_pos.z + bias;
+    const float kernel_radius = float[](8.0, 4.0, 2.0, 1.0)[cascade];
+    const uint sample_count = 64;
     vec3 shadow_factor = vec3(0.0);
 
-    for (uint i = 0; i < sampled_count; ++i) {
+    for (uint i = 0; i < sample_count; ++i) {
         const ivec2 noise_size = textureSize(blue_noise, 0);
         const ivec2 noise_texel = ivec2(int(gl_FragCoord.x) % noise_size.x, int(gl_FragCoord.y) % noise_size.y);
-        const vec2 xi = fract(sample_hammersley(i, sampled_count) + texelFetch(blue_noise, noise_texel, 0).xy);
+        const vec2 xi = fract(sample_hammersley(i, sample_count) + texelFetch(blue_noise, noise_texel, 0).xy);
         const float r = sqrt(xi.x);
-        const float theta = xi.y * 2.0 * 3.1415926535897932384626433832795;
+        const float theta = xi.y * 2.0 * M_PI;
         const vec2 offset = vec2(r * cos(theta), r * sin(theta));
-        const vec2 s_uv = shadow_frag_pos.xy + offset * scaled_texel_size;
+        const vec2 s_uv = shadow_frag_pos.xy + offset * texel_size * kernel_radius;
         shadow_factor += texture(shadow_map, vec4(s_uv, cascade, light_depth)).r;
     }
-    vec3 shadow = shadow_factor / float(sampled_count);
+    vec3 shadow = shadow_factor / float(sample_count);
     /*switch (cascade) {
         case 0: shadow *= vec3(1.0, 0.25, 0.25); break;
         case 1: shadow *= vec3(0.25, 1.0, 0.25); break;
@@ -245,23 +254,23 @@ vec3 calculate_shadow(in vec3 normal, in float depth_vs, in uint cascade) {
     const vec3 shadow_frag_pos = vec3(cascades[cascade].global * vec4(frag_pos, 1.0));
     const vec3 ddx_shadow_frag_pos = dFdxFine(shadow_frag_pos);
     const vec3 ddy_shadow_frag_pos = dFdyFine(shadow_frag_pos);
-    vec3 shadow_factor = sample_shadow(shadow_frag_pos, ddx_shadow_frag_pos, ddy_shadow_frag_pos, normal, cascade);
+    vec3 shadow_factor = sample_shadow(shadow_frag_pos, ddx_shadow_frag_pos, ddy_shadow_frag_pos, normal, depth_vs, cascade);
 
     const float blend_threshold = 0.175;
     const float next_split = cascades[cascade].offset.w;
     const float split_size = cascade == 0 ? next_split : next_split - cascades[cascade - 1].offset.w;
     const float split_distance = (next_split - depth_vs) / split_size;
     if (split_distance <= blend_threshold && cascade != CASCADE_COUNT - 1) {
-        const vec3 next_shadow_factor = sample_shadow(shadow_frag_pos, ddx_shadow_frag_pos, ddy_shadow_frag_pos, normal, cascade + 1);
-        const float lerp_t = smoothstep(0.0, blend_threshold, split_distance);
-        shadow_factor = mix(next_shadow_factor, shadow_factor, lerp_t);
+        const vec3 next_shadow_factor = sample_shadow(shadow_frag_pos, ddx_shadow_frag_pos, ddy_shadow_frag_pos, normal, depth_vs, cascade + 1);
+        const float t_lerp = smoothstep(0.0, blend_threshold, split_distance);
+        shadow_factor = mix(next_shadow_factor, shadow_factor, t_lerp);
     }
 
     return shadow_factor;
 }
 
 void main() {
-    const float ambient_factor = 0.025;
+    const float ambient_factor = 0.01;
     const vec3 diffuse = texture(material.diffuse, uv).rgb;
     const float alpha = texture(material.diffuse, uv).a;
     const vec3 specular = texture(material.specular, uv).rgb;
@@ -280,6 +289,5 @@ void main() {
         calculate_shadow(n_normal, depth_vs, cascade);
 
     out_pixel = vec4(color, alpha);
-    //out_pixel = vec4(calculate_shadow(n_normal, depth_vs, cascade), 1.0);
     out_transform_id = transform_id;
 }
