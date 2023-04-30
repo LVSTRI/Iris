@@ -34,7 +34,8 @@ namespace iris {
         glGenBuffers(1, &mesh._vbo);
         glGenBuffers(1, &mesh._ebo);
 
-        auto indices_count = indices.size();
+        glBindVertexArray(mesh._vao);
+
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh._ebo);
         if (indices.empty()) {
             indices.resize(vertices.size());
@@ -42,7 +43,6 @@ namespace iris {
         }
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, size_bytes(indices), indices.data(), GL_STATIC_DRAW);
 
-        glBindVertexArray(mesh._vao);
         glBindBuffer(GL_ARRAY_BUFFER, mesh._vbo);
         glBufferData(GL_ARRAY_BUFFER, size_bytes(vertices), vertices.data(), GL_STATIC_DRAW);
 
@@ -109,7 +109,6 @@ namespace iris {
 
     auto mesh_t::draw() const noexcept -> void {
         glBindVertexArray(_vao);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ebo);
         glDrawElements(GL_TRIANGLES, _indices.size(), GL_UNSIGNED_INT, nullptr);
     }
 

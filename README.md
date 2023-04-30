@@ -14,6 +14,7 @@ The keybindings are as follows:
 - `Shift`: Lowers the camera's y;
 - `Space`: Raises the camera's y;
 - `F`: Displays the AABB boxes of the objects;
+- `G`: Toggles between PSSM and PSSM + SDSM;
 - `Right Mouse Button`: Enables the camera to be moved around;
 - `Left Mouse Button`: Pick objects in 3D space;
 

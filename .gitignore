@@ -7,3 +7,10 @@ models/*
 !models/deccer-cubes
 .idea
 .idea/*
+/textures/16_16/
+/textures/32_32/
+/textures/64_64/
+/textures/128_128/
+/textures/256_256/
+/textures/512_512/
+/textures/1024_1024/

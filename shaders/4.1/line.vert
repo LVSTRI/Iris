@@ -1,10 +1,5 @@
 #version 460 core
 
-struct transform_data_t {
-    mat4 model;
-    mat4 t_inv_model;
-};
-
 layout (location = 0) in vec3 position;
 
 layout (std140, binding = 0) uniform camera_uniform_t {

@@ -19,6 +19,8 @@ layout (location = 0) in vec3 position;
 layout (location = 1) in vec3 normal;
 layout (location = 2) in vec2 uv;
 
+layout (location = 0) out vec2 out_uv;
+
 layout (std430, binding = 0) readonly restrict buffer cascade_output_t {
     cascade_data_t[CASCADE_COUNT] cascades;
 };
@@ -32,5 +34,6 @@ layout (location = 1) uniform uint layer;
 
 void main() {
     gl_Position = cascades[layer].pv * transform.data[transform_id].model * vec4(position, 1.0);
+    out_uv = uv;
     // gl_Layer = int(layer);
 }

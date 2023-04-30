@@ -12,6 +12,8 @@ struct cascade_data_t {
 
 layout (local_size_x = CASCADE_COUNT, local_size_y = 1, local_size_z = 1) in;
 
+layout (location = 0) uniform int sdsm_enable;
+
 layout (binding = 0, rg32f) uniform readonly restrict image2D depth;
 
 layout (std140, binding = 1) uniform cascade_setup_data_t {
@@ -76,8 +78,8 @@ void main() {
     const float far_clip = setup_data.far;
 
     vec2 reduction_depth = imageLoad(depth, ivec2(0)).rg;
-    const float min_depth = reduction_depth.x;
-    const float max_depth = reduction_depth.y;
+    const float min_depth = bool(sdsm_enable) ? reduction_depth.x : 0.0;
+    const float max_depth = bool(sdsm_enable) ? reduction_depth.y : 1.0;
 
     float[] cascade_splits = float[CASCADE_COUNT](0.0, 0.0, 0.0, 0.0);
     // PSSM

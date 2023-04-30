@@ -252,145 +252,21 @@ static auto calculate_shadow_frustum(const iris::camera_t& camera, const glm::ve
     }, uv_scale_bias * global.pv);
 }
 
-static auto calculate_pssm_cascades(const iris::camera_t& camera, const glm::mat4& global_pv, glm::vec3 light_dir, iris::float32 resolution) noexcept -> std::vector<cascade_data_t> {
-    const auto partition = [&](iris::uint32 cascade_index) {
-        const auto near_clip = camera.near();
-        const auto far_clip = camera.far();
-
-        const auto min_depth = 0.0f;
-        const auto max_depth = 1.0f;
-
-        auto cascade_splits = std::to_array<iris::float32, CASCADE_COUNT>({});
-        {
-            const auto lambda = 1.0f;
-            const auto clip_range = far_clip - near_clip;
-            const auto min_z = near_clip + min_depth * clip_range;
-            const auto max_z = near_clip + max_depth * clip_range;
-            const auto range = max_z - min_z;
-            const auto ratio = max_z / min_z;
-
-            for (auto i = 0_u32; i < CASCADE_COUNT; ++i) {
-                const auto p = (i + 1) / static_cast<iris::float32>(CASCADE_COUNT);
-                const auto s_log = min_z * glm::pow(ratio, p);
-                const auto s_uniform = min_z + range * p;
-                const auto d = lambda * (s_log - s_uniform) + s_uniform;
-                cascade_splits[i] = (d - near_clip) / clip_range;
-            }
-        }
-
-        auto frustum_corners = std::to_array({
-            glm::vec3(-1.0f, -1.0f, -1.0f),
-            glm::vec3( 1.0f, -1.0f, -1.0f),
-            glm::vec3(-1.0f,  1.0f, -1.0f),
-            glm::vec3( 1.0f,  1.0f, -1.0f),
-            glm::vec3(-1.0f, -1.0f,  1.0f),
-            glm::vec3( 1.0f, -1.0f,  1.0f),
-            glm::vec3(-1.0f,  1.0f,  1.0f),
-            glm::vec3( 1.0f,  1.0f,  1.0f),
-        });
-
-        const auto prev_split = cascade_index == 0 ? min_depth : cascade_splits[cascade_index - 1];
-        const auto curr_split = cascade_splits[cascade_index];
-        const auto inv_pv = glm::inverse(camera.projection() * camera.view());
-        for (auto i = 0_u32; i < 8; ++i) {
-            const auto corner = inv_pv * glm::vec4(frustum_corners[i], 1.0f);
-            frustum_corners[i] = corner / corner.w;
-        }
-
-        for (auto i = 0_u32; i < 4; ++i) {
-            const auto corner_ray = frustum_corners[i + 4] - frustum_corners[i];
-            frustum_corners[i + 4] = frustum_corners[i] + (corner_ray * prev_split);
-            frustum_corners[i] = frustum_corners[i] + (corner_ray * curr_split);
-        }
-
-        auto frustum_center = glm::vec3(0.0f);
-        for (auto i = 0_u32; i < 8; ++i) {
-            frustum_center += frustum_corners[i];
-        }
-        frustum_center /= 8.0f;
-
-        const auto d_up = glm::vec3(0.0f, 1.0f, 0.0f);
-
-        auto min_ext = glm::vec3(0.0f);
-        auto max_ext = glm::vec3(0.0f);
-        auto r_sphere = 0.0f;
-        for (auto i = 0_u32; i < 8; ++i) {
-            r_sphere = glm::max(r_sphere, glm::length(frustum_corners[i] - frustum_center));
-        }
-        max_ext = glm::vec3(r_sphere);
-        min_ext = -max_ext;
-
-        const auto cascade_ext = max_ext - min_ext;
-        const auto light_cam_pos = frustum_center + light_dir * -min_ext.z;
-        auto light_view = glm::lookAt(light_cam_pos, frustum_center, d_up);
-        auto light_proj = glm::ortho(min_ext.x, max_ext.x, min_ext.y, max_ext.y, 0.0f, cascade_ext.z);
-
-        // stabilize
-        {
-            const auto light_pv = light_proj * light_view;
-            auto shadow_origin = glm::vec3(0.0f);
-            shadow_origin = glm::vec3(light_pv * glm::vec4(shadow_origin, 1.0));
-            shadow_origin *= resolution / 2.0;
-            const auto rounded_origin = glm::round(shadow_origin);
-            auto round_offset = rounded_origin - shadow_origin;
-            round_offset *= 2.0 / resolution;
-            light_proj[3][0] += round_offset.x;
-            light_proj[3][1] += round_offset.y;
-        }
-        const auto light_pv = light_proj * light_view;
-
-        auto cascade_data = cascade_data_t();
-        cascade_data.projection = light_proj;
-        cascade_data.view = light_view;
-        cascade_data.pv = light_pv;
-
-        const auto clip_dist = far_clip - near_clip;
-
-        auto uv_scale_bias = glm::mat4(
-            glm::vec4(0.5f, 0.0f, 0.0f, 0.0f),
-            glm::vec4(0.0f, 0.5f, 0.0f, 0.0f),
-            glm::vec4(0.0f, 0.0f, 0.5f, 0.0f),
-            glm::vec4(0.5f, 0.5f, 0.5f, 1.0f));
-        const auto inv_cascade = glm::inverse(uv_scale_bias * (light_proj * light_view));
-
-        auto cascade_corners = std::to_array({
-            glm::vec3(inv_cascade * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)),
-            glm::vec3(inv_cascade * glm::vec4(1.0f, 1.0f, 1.0f, 1.0f)),
-        });
-        cascade_corners[0] = glm::vec3(global_pv * glm::vec4(cascade_corners[0], 1.0f));
-        cascade_corners[1] = glm::vec3(global_pv * glm::vec4(cascade_corners[1], 1.0f));
-
-        const auto cascade_scale = 1.0f / (cascade_corners[1] - cascade_corners[0]);
-
-        cascade_data.offset = glm::vec4(-cascade_corners[0], near_clip + curr_split * clip_dist);
-        cascade_data.scale = glm::make_vec4(cascade_scale);
-        cascade_data.global = global_pv;
-
-        return cascade_data;
-    };
-    return {
-        partition(0),
-        partition(1),
-        partition(2),
-        partition(3),
-    };
-}
-
-static auto calculate_workgroup_count_from_wh(iris::uint32 width, iris::uint32 height) noexcept -> std::vector<glm::uvec2> {
-    constexpr auto workgroup_size = 16_u32;
-    auto workgroup_count = std::vector<glm::uvec2>();
-    workgroup_count.reserve(16);
-    workgroup_count.emplace_back(
-        (width + workgroup_size - 1) / workgroup_size,
-        (height + workgroup_size - 1) / workgroup_size);
-    while (workgroup_count.back() != glm::uvec2(1)) {
-        const auto& previous = workgroup_count.back();
+static auto calculate_wg_from_resolution(iris::uint32 width, iris::uint32 height) noexcept -> std::vector<glm::uvec2> {
+    constexpr auto wg_size = 16_u32;
+    auto wg_count = std::vector<glm::uvec2>();
+    wg_count.reserve(16);
+    wg_count.emplace_back(
+        (width + wg_size - 1) / wg_size,
+        (height + wg_size - 1) / wg_size);
+    while (wg_count.back() != glm::uvec2(1)) {
+        const auto& previous = wg_count.back();
         const auto current_size = glm::uvec2(
-            (previous.x + workgroup_size - 1) / workgroup_size,
-            (previous.y + workgroup_size - 1) / workgroup_size);
-        workgroup_count.emplace_back(glm::max(current_size, glm::uvec2(1)));
+            (previous.x + wg_size - 1) / wg_size,
+            (previous.y + wg_size - 1) / wg_size);
+        wg_count.emplace_back(glm::max(current_size, glm::uvec2(1)));
     }
-    return workgroup_count;
+    return wg_count;
 }
 
 int main() {
@@ -492,7 +368,7 @@ int main() {
     auto simple_shader = iris::shader_t::create("../shaders/4.1/simple.vert", "../shaders/4.1/simple.frag");
     auto light_shader = iris::shader_t::create("../shaders/4.1/light.vert", "../shaders/4.1/light.frag");
     auto line_shader = iris::shader_t::create("../shaders/4.1/line.vert", "../shaders/4.1/line.frag");
-    auto shadow_shader = iris::shader_t::create("../shaders/4.1/shadow.vert", "../shaders/4.1/empty.frag");
+    auto shadow_shader = iris::shader_t::create("../shaders/4.1/shadow.vert", "../shaders/4.1/shadow.frag");
     auto depth_only_shader = iris::shader_t::create("../shaders/4.1/depth_only.vert", "../shaders/4.1/empty.frag");
     auto debug_shadow_shader = iris::shader_t::create("../shaders/4.1/debug_shadow.vert", "../shaders/4.1/debug_shadow.frag");
     auto depth_reduce_init_shader = iris::shader_t::create_compute("../shaders/4.1/depth_reduce_init.comp");
@@ -504,6 +380,9 @@ int main() {
     textures.emplace_back(iris::texture_t::create("../textures/wall.jpg", iris::texture_type_t::non_linear_srgb));
     textures.emplace_back(iris::texture_t::create("../textures/container.png", iris::texture_type_t::non_linear_srgb));
     textures.emplace_back(iris::texture_t::create("../textures/container_specular.png", iris::texture_type_t::non_linear_srgb));
+
+    // blue noise
+    auto blue_noise_shadow = iris::texture_t::create("../textures/1024_1024/LDR_RGBA_0.png", iris::texture_type_t::linear_srgb);
 
     auto meshes = std::vector<iris::mesh_t>();
     {
@@ -663,11 +542,9 @@ int main() {
             4,
             GL_DEPTH_COMPONENT32F,
             GL_DEPTH_COMPONENT,
-            GL_FLOAT),
+            GL_FLOAT,
+            false),
     });
-    f1_shadow_attachments[0].bind();
-    glTexParameteri(f1_shadow_attachments[0].target(), GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
-    glTexParameteri(f1_shadow_attachments[0].target(), GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
 
     auto f0_main = iris::framebuffer_t::create({
         std::cref(f0_main_attachments[0]),
@@ -719,7 +596,6 @@ int main() {
 
     // uniform buffers
     auto camera_buffer = iris::buffer_t::create(sizeof(camera_data_t), GL_UNIFORM_BUFFER);
-    auto shadow_camera_buffer = iris::buffer_t::create(sizeof(cascade_data_t[4]), GL_SHADER_STORAGE_BUFFER);
     auto model_buffer = iris::buffer_t::create(sizeof(glm::mat4[16384]), GL_SHADER_STORAGE_BUFFER);
     auto point_light_buffer = iris::buffer_t::create(sizeof(point_light_t[32]), GL_SHADER_STORAGE_BUFFER);
     auto dir_light_buffer = iris::buffer_t::create(sizeof(directional_light_t[32]), GL_UNIFORM_BUFFER);
@@ -728,7 +604,7 @@ int main() {
 
     // depth reduce output
     // yes I know this isn't a framebuffer attachment
-    auto depth_reduce_wgc = calculate_workgroup_count_from_wh(window.width, window.height);
+    auto depth_reduce_wgc = calculate_wg_from_resolution(window.width, window.height);
     auto depth_reduce_outs = std::vector<iris::framebuffer_attachment_t>();
     depth_reduce_outs.reserve(32);
     for (const auto& each : depth_reduce_wgc) {
@@ -749,6 +625,11 @@ int main() {
 
     // render loop
     glEnable(GL_SCISSOR_TEST);
+
+    dir_light_sun.direction = glm::vec3(-2.25f * glm::sin(0), 35.0f, -6.5f * glm::cos(0));
+
+    auto toggle_sdsm = true;
+    auto prev_kg_pressed = false;
     while (!glfwWindowShouldClose(window.handle)) {
         const auto current_time = static_cast<iris::float32>(glfwGetTime());
         delta_time = current_time - last_frame;
@@ -757,6 +638,8 @@ int main() {
         if (glfwGetKey(window.handle, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
             glfwSetWindowShouldClose(window.handle, true);
         }
+
+        auto kg_pressed = glfwGetKey(window.handle, GLFW_KEY_G) == GLFW_PRESS;
 
         auto scene = scene_t();
         {
@@ -819,7 +702,7 @@ int main() {
             glDrawBuffers(2, draw_attachments.data());
             glReadBuffer(GL_COLOR_ATTACHMENT1);
 
-            depth_reduce_wgc = calculate_workgroup_count_from_wh(window.width, window.height);
+            depth_reduce_wgc = calculate_wg_from_resolution(window.width, window.height);
             depth_reduce_outs.clear();
             for (const auto& each : depth_reduce_wgc) {
                 depth_reduce_outs.emplace_back(iris::framebuffer_attachment_t::create(
@@ -840,10 +723,8 @@ int main() {
             camera.position()
         };
 
-        dir_light_sun.direction = glm::vec3(-2.25f * glm::sin(current_time), 35.0f, -6.5f * glm::cos(current_time));
-
         // shadow camera
-        const auto [shadow_frustums, global_shadow_pv] = calculate_shadow_frustum(camera, glm::normalize(dir_light_sun.direction));
+        const auto [_, global_shadow_pv] = calculate_shadow_frustum(camera, glm::normalize(dir_light_sun.direction));
 
         const auto cascade_setup = cascade_setup_data_t {
             global_shadow_pv,
@@ -856,7 +737,6 @@ int main() {
         };
 
         camera_buffer.write(&camera_data, iris::size_bytes(camera_data));
-        shadow_camera_buffer.write(shadow_frustums.data(), iris::size_bytes(shadow_frustums));
         model_buffer.write(transforms.data(), iris::size_bytes(transforms));
         point_light_buffer.write(point_lights.data(), iris::size_bytes(point_lights));
         dir_light_buffer.write(&dir_light_sun, iris::size_bytes(dir_light_sun));
@@ -872,13 +752,12 @@ int main() {
         glScissor(0, 0, f0_main.width(), f0_main.height());
         const auto clear_depth = glm::vec4(1.0f);
         glClearBufferfv(GL_DEPTH, 0, glm::value_ptr(clear_depth));
+        camera_buffer.bind_base(0);
+        depth_only_shader.bind();
+        model_buffer.bind_base(1);
         for (const auto& [ref, id] : scene.meshes) {
             const auto& mesh = ref.get();
-            depth_only_shader
-                .bind()
-                .set(0, { id });
-            camera_buffer.bind_base(0);
-            model_buffer.bind_base(1);
+            depth_only_shader.set(0, { id });
             mesh.draw();
         }
 
@@ -901,8 +780,14 @@ int main() {
             glDispatchCompute(depth_reduce_wgc[i].x, depth_reduce_wgc[i].y, 1);
         }
 
+        if (!prev_kg_pressed && kg_pressed) {
+            toggle_sdsm = !toggle_sdsm;
+        }
+
         // setup shadow cascades
-        setup_shadows_shader.bind();
+        setup_shadows_shader
+            .bind()
+            .set(0, { (iris::int32)toggle_sdsm });
         f0_main_attachments[2].bind();
         glBindImageTexture(0, depth_reduce_outs.back().id(), 0, GL_FALSE, 0, GL_READ_ONLY, GL_RG32F);
         cascade_setup_buffer.bind_base(1);
@@ -918,9 +803,15 @@ int main() {
             glReadBuffer(GL_COLOR_ATTACHMENT1);
         }
         // render the shadow map
+        f1_shadow_attachments[0].bind();
+        glTexParameteri(f1_shadow_attachments[0].target(), GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+        glTexParameteri(f1_shadow_attachments[0].target(), GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
         f1_shadow.bind();
         glCullFace(GL_FRONT);
-        for (auto i = 0_u32; i < shadow_frustums.size(); ++i) {
+        shadow_shader.bind();
+        cascade_out_buffer.bind_base(0);
+        model_buffer.bind_base(1);
+        for (auto i = 0_u32; i < CASCADE_COUNT; ++i) {
             f1_shadow.set_layer(0, i);
             glViewport(0, 0, f1_shadow.width(), f1_shadow.height());
             glScissor(0, 0, f1_shadow.width(), f1_shadow.height());
@@ -929,12 +820,16 @@ int main() {
             for (const auto& [ref, id] : scene.meshes) {
                 const auto& mesh = ref.get();
                 shadow_shader
-                    .bind()
                     .set(0, { id })
                     .set(1, { i });
-                cascade_out_buffer.bind_base(0);
-                //shadow_camera_buffer.bind_base(0);
-                model_buffer.bind_base(1);
+                if (!mesh.textures().empty()) {
+                    mesh
+                        .textures()
+                        .back()
+                        .get()
+                        .bind(0);
+                    shadow_shader.set(2, { 0_i32 });
+                }
                 mesh.draw();
             }
         }
@@ -951,6 +846,8 @@ int main() {
         // debug AABBs
         if (glfwGetKey(window.handle, GLFW_KEY_F) == GLFW_PRESS) {
             auto mesh_id = 0_u32;
+            line_shader.bind();
+            camera_buffer.bind_base(0);
             for (const auto& model : models) {
                 for (const auto& mesh : model.meshes()) {
                     const auto& aabb = mesh.aabb();
@@ -960,11 +857,8 @@ int main() {
                     transform = transforms[mesh_id][0] * transform;
 
                     line_shader
-                        .bind()
                         .set(0, transform)
                         .set(3, { 1.0f, 1.0f, 1.0f });
-
-                    camera_buffer.bind_base(0);
 
                     glBindVertexArray(aabb_vao);
                     glDrawArrays(GL_LINES, 0, 24);
@@ -974,21 +868,16 @@ int main() {
         }
         glCullFace(GL_BACK);
         // 2. render opaque objects
+        simple_shader.bind();
+        camera_buffer.bind_base(0);
+        model_buffer.bind_range(1, 0, iris::size_bytes(transforms));
+        cascade_out_buffer.bind_base(2);
+        point_light_buffer.bind_range(3, 0, iris::size_bytes(point_lights) + 1);
+        dir_light_buffer.bind_base(4);
         for (const auto& mesh : scene.opaque_meshes) {
             const auto& u_mesh = mesh.ref.get();
 
-            simple_shader
-                .bind()
-                .set(0, { mesh.id })
-                .set(1, { (iris::uint32)shadow_frustums.size() });
-
-            camera_buffer.bind_base(0);
-            model_buffer.bind_range(1, 0, iris::size_bytes(transforms));
-            cascade_out_buffer.bind_base(2);
-            //shadow_camera_buffer.bind_base(2);
-            point_light_buffer.bind_range(3, 0, iris::size_bytes(point_lights) + 1);
-            dir_light_buffer.bind_base(4);
-
+            simple_shader.set(0, { mesh.id });
             for (auto j = 0_i32; const auto& texture : u_mesh.textures()) {
                 texture.get().bind(j);
                 simple_shader.set(4 + j, { j });
@@ -1000,6 +889,9 @@ int main() {
             glActiveTexture(GL_TEXTURE2);
             f1_shadow_attachments[0].bind();
             simple_shader.set(8, { 2_i32 });
+
+            blue_noise_shadow.bind(3);
+            simple_shader.set(9, { 3_i32 });
 
             u_mesh.draw();
         }
@@ -1023,20 +915,16 @@ int main() {
             });
         }
 
+        simple_shader.bind();
+        camera_buffer.bind_base(0);
+        model_buffer.bind_range(1, 0, iris::size_bytes(transforms));
+        cascade_out_buffer.bind_base(2);
+        point_light_buffer.bind_range(3, 0, iris::size_bytes(point_lights) + 1);
+        dir_light_buffer.bind_base(4);
         for (const auto& mesh : scene.transparent_meshes) {
             const auto& u_mesh = mesh.ref.get();
 
-            simple_shader
-                .bind()
-                .set(0, { mesh.id })
-                .set(1, { (iris::uint32)shadow_frustums.size() });
-
-            camera_buffer.bind_base(0);
-            model_buffer.bind_range(1, 0, iris::size_bytes(transforms));
-            cascade_out_buffer.bind_base(2);
-            //shadow_camera_buffer.bind_base(2);
-            point_light_buffer.bind_range(3, 0, iris::size_bytes(point_lights) + 1);
-            dir_light_buffer.bind_base(4);
+            simple_shader.set(0, { mesh.id });
 
             for (auto j = 0_i32; const auto& texture : u_mesh.textures()) {
                 texture.get().bind(j);
@@ -1050,21 +938,25 @@ int main() {
             f1_shadow.attachment(0).bind();
             simple_shader.set(8, { 2_i32 });
 
+            blue_noise_shadow.bind(3);
+            simple_shader.set(9, { 3_i32 });
+
             u_mesh.draw();
         }
 
+        light_shader.bind();
+        camera_buffer.bind_base(0);
         for (auto i = 0_u32; i < light_positions.size(); ++i) {
             light_shader
-                .bind()
                 .set(0, light_transforms[i])
                 .set(3, point_lights[i].diffuse);
-
-            camera_buffer.bind_base(0);
 
             meshes[0].draw();
         }
 
         // highlight the hit object (if any)
+        line_shader.bind();
+        camera_buffer.bind_base(0);
         if (hit_mesh) {
             const auto& [r_mesh, id] = *hit_mesh;
             const auto& aabb = r_mesh.get().aabb();
@@ -1074,11 +966,8 @@ int main() {
             transform = transforms[id][0] * transform;
 
             line_shader
-                .bind()
                 .set(0, transform)
                 .set(3, { 1.0f, 1.0f, 1.0f });
-
-            camera_buffer.bind_base(0);
 
             glBindVertexArray(aabb_vao);
             glDrawArrays(GL_LINES, 0, 24);
@@ -1094,6 +983,7 @@ int main() {
                 c_y < 0.0 || c_y > window.height;
             if (!is_oob && glfwGetMouseButton(window.handle, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
                 auto mesh_id = -1_u32;
+                f0_main_attachments[1].bind();
                 glReadPixels(c_x, window.height - c_y, 1, 1, GL_RED_INTEGER, GL_UNSIGNED_INT, &mesh_id);
                 if (mesh_id != -1 && mesh_id < scene.meshes.size()) {
                     hit_mesh = {
@@ -1120,39 +1010,43 @@ int main() {
 
         // render debug shadow
         if (glfwGetKey(window.handle, GLFW_KEY_F2) == GLFW_PRESS) {
-            fullscreen_shader.bind();
             glDisable(GL_DEPTH_TEST);
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
             const auto aspect =
                 static_cast<iris::float32>(window.height) /
                 static_cast<iris::float32>(window.width);
-            const auto debug_render_width = 512;
+            const auto debug_render_width = 384;
             const auto debug_render_height = debug_render_width * aspect;
-            glViewport(
-                0,
-                window.height - debug_render_height + 1,
-                debug_render_width,
-                debug_render_height);
-            glScissor(
-                0,
-                window.height - debug_render_height + 1,
-                debug_render_width,
-                debug_render_height);
-            glClear(GL_COLOR_BUFFER_BIT);
-
-            debug_shadow_shader
-                .bind()
-                .set(0, { 0_i32 });
             glBindVertexArray(f_quad_vao);
             glActiveTexture(GL_TEXTURE0);
             f1_shadow_attachments[0].bind();
-            fullscreen_shader.set(0, { 0_i32 });
-            glDrawArrays(GL_TRIANGLES, 0, 6);
+            glTexParameteri(f1_shadow_attachments[0].target(), GL_TEXTURE_COMPARE_MODE, GL_NONE);
+            for (auto layer = 0_u32; layer < CASCADE_COUNT; ++layer) {
+                glViewport(
+                    0,
+                    window.height - (debug_render_height * (layer + 1)) - 1,
+                    debug_render_width,
+                    debug_render_height);
+                glScissor(
+                    0,
+                    window.height - (debug_render_height * (layer + 1)) - 1,
+                    debug_render_width,
+                    debug_render_height);
+                glClear(GL_COLOR_BUFFER_BIT);
+
+                debug_shadow_shader
+                    .bind()
+                    .set(0, { 0_i32 })
+                    .set(1, { layer });
+                glDrawArrays(GL_TRIANGLES, 0, 6);
+            }
             glEnable(GL_DEPTH_TEST);
         }
 
         glfwSwapBuffers(window.handle);
         glfwPollEvents();
+
+        prev_kg_pressed = kg_pressed;
 
         // update the window (only cursor position for now) and camera.
         window.update();

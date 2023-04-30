@@ -5,6 +5,7 @@
 #include <iostream>
 #include <cstdint>
 #include <fstream>
+#include <random>
 #include <string>
 
 namespace iris {
@@ -44,6 +45,16 @@ namespace iris {
         file.seekg(0, std::ios::beg);
         file.read(result.data(), result.size());
         return result;
+    }
+
+    template <typename T>
+    auto random(T min, T max) noexcept -> T {
+        static auto engine = std::mt19937(std::random_device()());
+        if constexpr (std::is_floating_point_v<T>) {
+            return std::uniform_real_distribution<T>(min, max)(engine);
+        } else {
+            return std::uniform_int_distribution<T>(min, max)(engine);
+        }
     }
 
     template <typename T>
