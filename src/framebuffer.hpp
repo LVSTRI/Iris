@@ -3,7 +3,6 @@
 #include <utilities.hpp>
 
 #include <vector>
-#include <vector>
 #include <span>
 
 namespace iris {
@@ -31,6 +30,8 @@ namespace iris {
         auto target() const noexcept -> uint32;
 
         auto bind() const noexcept -> void;
+        auto bind_texture(uint32 index) const noexcept -> void;
+        auto bind_image_texture(uint32 index, uint32 level, bool layered, uint32 layer, uint32 access) const noexcept -> void;
 
         auto swap(self& other) noexcept -> void;
 
@@ -66,6 +67,11 @@ namespace iris {
         auto attachments() const noexcept -> std::span<const std::reference_wrapper<const framebuffer_attachment_t>>;
 
         auto bind() const noexcept -> void;
+
+        auto clear_depth(float32 depth) const noexcept -> void;
+        auto clear_depth_stencil(float32 depth, uint32 stencil) const noexcept -> void;
+        auto clear_color(uint32 index, const float32(&color)[]) const noexcept -> void;
+        auto clear_color(uint32 index, const uint32(&color)[]) const noexcept -> void;
 
         auto attachment(uint32 index) -> const framebuffer_attachment_t&;
         auto is_complete() const noexcept -> bool;

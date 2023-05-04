@@ -29,29 +29,35 @@ namespace iris {
         return *this;
     }
 
-    auto framebuffer_attachment_t::create(uint32 width, uint32 height, uint32 layers, int32 format, int32 base_format, uint32 type, bool nearest) noexcept -> self {
+    auto framebuffer_attachment_t::create(
+            uint32 width,
+            uint32 height,
+            uint32 layers,
+            int32 format,
+            int32 base_format,
+            uint32 type,
+            bool nearest) noexcept -> self {
         auto attachment = self();
         const auto target = layers == 1 ? GL_TEXTURE_2D : GL_TEXTURE_2D_ARRAY;
 
-        glGenTextures(1, &attachment._id);
-        glBindTexture(target, attachment._id);
+        glCreateTextures(target, 1, &attachment._id);
 
         if (layers > 1) {
-            glTexImage3D(target, 0, format, width, height, layers, 0, base_format, type, nullptr);
+            glTextureStorage3D(attachment._id, 1, format, width, height, layers);
         } else {
-            glTexImage2D(target, 0, format, width, height, 0, base_format, type, nullptr);
+            glTextureStorage2D(attachment._id, 1, format, width, height);
         }
         if (nearest) {
-            glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-            glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTextureParameteri(attachment._id, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTextureParameteri(attachment._id, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         } else {
-            glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-            glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTextureParameteri(attachment._id, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTextureParameteri(attachment._id, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         }
-        glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-        glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+        glTextureParameteri(attachment._id, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+        glTextureParameteri(attachment._id, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
         const auto color = std::to_array({ 1.0f, 1.0f, 1.0f, 1.0f });
-        glTexParameterfv(target, GL_TEXTURE_BORDER_COLOR, color.data());
+        glTextureParameterfv(attachment._id, GL_TEXTURE_BORDER_COLOR, color.data());
 
         attachment._width = width;
         attachment._height = height;
@@ -99,6 +105,16 @@ namespace iris {
         glBindTexture(_target, _id);
     }
 
+    auto framebuffer_attachment_t::bind_texture(uint32 index) const noexcept -> void {
+        glBindTextureUnit(index, _id);
+    }
+
+    auto
+    framebuffer_attachment_t::bind_image_texture(uint32 index, uint32 level, bool layered, uint32 layer, uint32 access) const noexcept
+        -> void {
+        glBindImageTexture(index, _id, level, layered, layer, access, _format);
+    }
+
     auto framebuffer_attachment_t::swap(self& other) noexcept -> void {
         using std::swap;
         swap(_id, other._id);
@@ -129,14 +145,12 @@ namespace iris {
 
     auto framebuffer_t::create(std::vector<std::reference_wrapper<const framebuffer_attachment_t>> attachments) noexcept -> self {
         auto framebuffer = self();
-        glGenFramebuffers(1, &framebuffer._id);
-        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer._id);
+        glCreateFramebuffers(1, &framebuffer._id);
 
         for (auto i = 0; i < attachments.size(); ++i) {
             const auto& u_attachment = attachments[i].get();
             auto target = base_format_to_attachment(u_attachment.base_format(), i);
-            u_attachment.bind();
-            glFramebufferTexture(GL_FRAMEBUFFER, target, u_attachment.id(), 0);
+            glNamedFramebufferTexture(framebuffer._id, target, u_attachment.id(), 0);
         }
         framebuffer._width = attachments[0].get().width();
         framebuffer._height = attachments[0].get().height();
@@ -163,9 +177,22 @@ namespace iris {
 
     auto framebuffer_t::bind() const noexcept -> void {
         glBindFramebuffer(GL_FRAMEBUFFER, _id);
-        for (const auto& attachment : _attachments) {
-            attachment.get().bind();
-        }
+    }
+
+    auto framebuffer_t::clear_depth(float32 depth) const noexcept -> void {
+        glClearNamedFramebufferfv(_id, GL_DEPTH, 0, &depth);
+    }
+
+    auto framebuffer_t::clear_depth_stencil(float32 depth, uint32 stencil) const noexcept -> void {
+        glClearNamedFramebufferfi(_id, GL_DEPTH_STENCIL, 0, depth, stencil);
+    }
+
+    auto framebuffer_t::clear_color(uint32 index, const float32(&color)[]) const noexcept -> void {
+        glClearNamedFramebufferfv(_id, GL_COLOR, index, color);
+    }
+
+    auto framebuffer_t::clear_color(uint32 index, const uint32(&color)[]) const noexcept -> void {
+        glClearNamedFramebufferuiv(_id, GL_COLOR, index, color);
     }
 
     auto framebuffer_t::attachment(uint32 index) -> const framebuffer_attachment_t& {
@@ -173,17 +200,14 @@ namespace iris {
     }
 
     auto framebuffer_t::is_complete() const noexcept -> bool {
-        bind();
-        return glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+        return glCheckNamedFramebufferStatus(_id, GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
     }
 
     auto framebuffer_t::set_layer(uint32 index, uint32 layer) const noexcept -> void {
-        bind();
         const auto& u_attachment = _attachments[index].get();
         if (u_attachment.layers() > 1) {
-            u_attachment.bind();
-            glFramebufferTextureLayer(
-                GL_FRAMEBUFFER,
+            glNamedFramebufferTextureLayer(
+                _id,
                 base_format_to_attachment(u_attachment.base_format()),
                 u_attachment.id(),
                 0,

@@ -97,27 +97,27 @@ namespace iris {
     }
 
     auto shader_t::set(int32 location, const glm::vec2& value) const noexcept -> const self& {
-        glUniform2f(location, value[0], value[1]);
+        glProgramUniform2f(_id, location, value[0], value[1]);
         return *this;
     }
 
     auto shader_t::set(int32 location, const glm::vec3& value) const noexcept -> const self& {
-        glUniform3f(location, value[0], value[1], value[2]);
+        glProgramUniform3f(_id, location, value[0], value[1], value[2]);
         return *this;
     }
 
     auto shader_t::set(int32 location, const glm::vec4& value) const noexcept -> const self& {
-        glUniform4f(location, value[0], value[1], value[2], value[3]);
+        glProgramUniform4f(_id, location, value[0], value[1], value[2], value[3]);
         return *this;
     }
 
     auto shader_t::set(int32 location, const glm::mat4& values) const noexcept -> const self& {
-        glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(values));
+        glProgramUniformMatrix4fv(_id, location, 1, GL_FALSE, glm::value_ptr(values));
         return *this;
     }
 
     auto shader_t::set(int32 location, std::span<const glm::mat4> values) const noexcept -> const self& {
-        glUniformMatrix4fv(location, values.size(), GL_FALSE, glm::value_ptr(values[0]));
+        glProgramUniformMatrix4fv(_id, location, values.size(), GL_FALSE, glm::value_ptr(values[0]));
         return *this;
     }
 

@@ -34,6 +34,10 @@ namespace iris {
         F _func = {};
     };
 
+    #define iris_concat_impl(a, b) a##b
+    #define iris_concat(a, b) iris_concat_impl(a, b)
+    #define iris_defer(f) auto iris_concat(__defer_func_, __LINE__) = iris::defer_t(f)
+
     template <typename... Args>
     auto log(Args&&... args) noexcept -> void {
         (std::cout << ... << args) << '\n';
@@ -79,6 +83,11 @@ namespace iris {
         return static_cast<const T*>(std::addressof(const_cast<T&>(value)));
     }
 
+    template <typename T>
+    constexpr auto as_const_ptr(const T(&value)[]) noexcept -> const T* {
+        return static_cast<const T*>(std::addressof(const_cast<T&>(value[0])));
+    }
+
     inline namespace literals {
         constexpr auto operator ""_i8(unsigned long long int value) noexcept -> int8 {
             return static_cast<int8>(value);
@@ -118,6 +127,18 @@ namespace iris {
 
         constexpr auto operator ""_f64(long double value) noexcept -> float64 {
             return static_cast<float64>(value);
+        }
+
+        constexpr auto operator ""_KiB(unsigned long long int value) noexcept -> uint64 {
+            return value * 1024;
+        }
+
+        constexpr auto operator ""_MiB(unsigned long long int value) noexcept -> uint64 {
+            return value * 1024 * 1024;
+        }
+
+        constexpr auto operator ""_GiB(unsigned long long int value) noexcept -> uint64 {
+            return value * 1024 * 1024 * 1024;
         }
     } // namespace iris::literals
 } // namespace iris

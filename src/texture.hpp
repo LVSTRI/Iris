@@ -20,12 +20,13 @@ namespace iris {
         texture_t(self&& other) noexcept;
         auto operator =(self&& other) noexcept -> self&;
 
-        static auto create(const fs::path& path, texture_type_t type) noexcept -> self;
+        static auto create(const fs::path& path, texture_type_t type, bool make_resident = true) noexcept -> self;
 
         auto id() const noexcept -> uint32;
         auto width() const noexcept -> uint32;
         auto height() const noexcept -> uint32;
         auto channels() const noexcept -> uint32;
+        auto handle() const noexcept -> uint64;
         auto is_opaque() const noexcept -> bool;
 
         auto bind(uint32 index) const noexcept -> void;
@@ -38,6 +39,9 @@ namespace iris {
         uint32 _height = 0;
         uint32 _channels = 0;
 
+        uint64 _handle = 0;
+
         bool _is_opaque = true;
+        bool _is_resident = false;
     };
 } // namespace iris

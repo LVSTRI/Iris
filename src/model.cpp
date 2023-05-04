@@ -1,50 +1,50 @@
 #include <texture.hpp>
 #include <model.hpp>
-#include <mesh.hpp>
+#include <mesh_pool.hpp>
 
 #include <glad/gl.h>
-
-#include <assimp/Importer.hpp>
-#include <assimp/scene.h>
-#include <assimp/postprocess.h>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#include <cgltf.h>
+
 #include <vector>
-#include <stack>
+#include <queue>
 
 namespace iris {
-    static auto import_texture(const aiScene& scene,
-                               const aiMaterial& material,
-                               aiTextureType type,
-                               const fs::path& root,
-                               std::unordered_map<fs::path, texture_t>& textures) noexcept -> const texture_t* {
-        if (material.GetTextureCount(type) > 0) {
-            auto t_path = aiString();
-            if (material.GetTexture(type, 0, &t_path) == AI_SUCCESS) {
-                auto path = root / t_path.C_Str();
-                if (path.string().contains('*')) {
-                    const auto& e_texture = *scene.GetEmbeddedTexture(t_path.C_Str());
-                    path = root / e_texture.mFilename.C_Str();
-                }
-                if (!path.has_extension()) {
+    struct vertex_format_t {
+        glm::vec3 position = {};
+        glm::vec3 normal = {};
+        glm::vec2 uv = {};
+        glm::vec4 tangent = {};
+    };
+
+    static auto vertex_format_as_attributes() noexcept {
+        return std::vector<vertex_attribute_t>{
+            { 0, 3 },
+            { 1, 3 },
+            { 2, 2 },
+            { 3, 4 },
+        };
+    }
+
+    static auto decode_texture_path(const fs::path& base, const cgltf_image* image) noexcept {
+        auto path = fs::path();
+        if (!image->uri) {
+            path = base / image->name;
+            if (!path.has_extension()) {
+                if (std::strcmp(image->mime_type, "image/png") == 0) {
                     path.replace_extension(".png");
-                    if (!fs::exists(path)) {
-                        path.replace_extension(".jpg");
-                    }
+                } else if (std::strcmp(image->mime_type, "image/jpeg") == 0) {
+                    path.replace_extension(".jpg");
                 }
-                if (!textures.contains(path)) {
-                    const auto t_type = type == aiTextureType_DIFFUSE ?
-                        texture_type_t::non_linear_srgb :
-                        texture_type_t::linear_srgb;
-                    textures[path] = texture_t::create(path, t_type);
-                }
-                return &textures[path];
             }
+        } else {
+            path = base / image->uri;
         }
-        return nullptr;
+        return path.generic_string();
     }
 
     model_t::model_t() noexcept = default;
@@ -60,97 +60,183 @@ namespace iris {
         return *this;
     }
 
-    auto model_t::create(const fs::path& path) noexcept -> self {
+    // TODO: temporary, "model_t" should be a simple container, it should NOT upload things to the GPU nor invoke "mesh_pool_t"
+    auto model_t::create(mesh_pool_t& mesh_pool, const fs::path& path) noexcept -> self {
         auto model = self();
-        auto importer = Assimp::Importer();
-        const auto importer_flags =
-            aiProcess_Triangulate |
-            aiProcess_FlipUVs |
-            aiProcess_GenNormals;
-        auto* scene = importer.ReadFile(path.string(), importer_flags);
-        if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
-            iris::log("assimp error: ", importer.GetErrorString());
-            assert(false && "failed to load model");
-        }
+        auto options = cgltf_options();
+        auto* gltf = std::type_identity_t<cgltf_data*>();
+        const auto s_path = path.generic_string();
+        const auto s_base_path = path.parent_path().generic_string();
+        cgltf_parse_file(&options, s_path.c_str(), &gltf);
+        cgltf_load_buffers(&options, gltf, s_path.c_str());
 
-        const auto root = path.parent_path();
-        auto nodes = std::vector<const aiNode*>();
-        nodes.reserve(16);
-        {
-            auto stack = std::stack<const aiNode*>();
-            stack.push(scene->mRootNode);
-            while (!stack.empty()) {
-                const auto* node = stack.top();
-                stack.pop();
-                nodes.push_back(node);
-                for (auto i = 0_u32; i < node->mNumChildren; ++i) {
-                    stack.push(node->mChildren[i]);
+        auto texture_cache = std::unordered_map<std::string, uint32>();
+        const auto import_texture = [&](const cgltf_texture* texture, texture_type_t type) {
+            if (texture) {
+                const auto& image = texture->image;
+                const auto t_path = decode_texture_path(s_base_path, image);
+                if (fs::exists(t_path) && !texture_cache.contains(t_path)) {
+                    texture_cache[t_path] = model._textures.size();
+                    model._textures.emplace_back(texture_t::create(t_path, type));
                 }
+            }
+        };
+        for (auto i = 0_u32; i < gltf->materials_count; ++i) {
+            const auto& material = gltf->materials[i];
+            const auto* texture = material.pbr_metallic_roughness.base_color_texture.texture;
+            if (material.has_pbr_metallic_roughness) {
+                import_texture(texture, texture_type_t::non_linear_srgb);
+            }
+
+            import_texture(material.normal_texture.texture, texture_type_t::linear_srgb);
+
+            texture = material.pbr_specular_glossiness.specular_glossiness_texture.texture;
+            if (material.has_pbr_specular_glossiness) {
+                import_texture(texture, texture_type_t::linear_srgb);
             }
         }
 
-        model._meshes.reserve(nodes.size());
-        for (const auto* node : nodes) {
-            for (auto i = 0_u32; i < node->mNumMeshes; ++i) {
-                const auto& mesh = *scene->mMeshes[node->mMeshes[i]];
-                // vertices processing
-                auto vertices = std::vector<vertex_t>();
-                vertices.reserve(mesh.mNumVertices);
-                for (auto j = 0_u32; j < mesh.mNumVertices; ++j) {
-                    auto& vertex = vertices.emplace_back();
-                    vertex = {
-                        .position = {
-                            mesh.mVertices[j].x,
-                            mesh.mVertices[j].y,
-                            mesh.mVertices[j].z
-                        },
-                        .normal = {
-                            mesh.mNormals[j].x,
-                            mesh.mNormals[j].y,
-                            mesh.mNormals[j].z
+        for (auto i = 0_u32; i < gltf->scene->nodes_count; ++i) {
+            auto nodes = std::queue<const cgltf_node*>();
+            nodes.push(gltf->scene->nodes[i]);
+            while (!nodes.empty()) {
+                const auto& node = *nodes.front();
+                nodes.pop();
+                if (!node.mesh) {
+                    for (auto j = 0_u32; j < node.children_count; ++j) {
+                        nodes.push(node.children[j]);
+                    }
+                    continue;
+                }
+                const auto& mesh = *node.mesh;
+                for (auto j = 0_u32; j < mesh.primitives_count; ++j) {
+                    const auto& primitive = mesh.primitives[j];
+                    const auto* position_ptr = std::type_identity_t<glm::vec3*>();
+                    const auto* normal_ptr = std::type_identity_t<glm::vec3*>();
+                    const auto* uv_ptr = std::type_identity_t<glm::vec2*>();
+                    const auto* tangent_ptr = std::type_identity_t<glm::vec4*>();
+
+                    auto vertices = std::vector<vertex_format_t>();
+                    auto vertex_count = 0_u32;
+                    for (uint32 k = 0; k < primitive.attributes_count; ++k) {
+                        const auto& attribute = primitive.attributes[k];
+                        const auto& accessor = *attribute.data;
+                        const auto& buffer_view = *accessor.buffer_view;
+                        const auto& buffer = *buffer_view.buffer;
+                        const auto& data_ptr = static_cast<const char*>(buffer.data);
+                        switch (attribute.type) {
+                            case cgltf_attribute_type_position:
+                                vertex_count = accessor.count;
+                                position_ptr = reinterpret_cast<const glm::vec3*>(data_ptr + buffer_view.offset + accessor.offset);
+                                break;
+
+                            case cgltf_attribute_type_normal:
+                                normal_ptr = reinterpret_cast<const glm::vec3*>(data_ptr + buffer_view.offset + accessor.offset);
+                                break;
+
+                            case cgltf_attribute_type_texcoord:
+                                if (!uv_ptr) {
+                                    uv_ptr = reinterpret_cast<const glm::vec2*>(data_ptr + buffer_view.offset + accessor.offset);
+                                }
+                                break;
+
+                            case cgltf_attribute_type_tangent:
+                                tangent_ptr = reinterpret_cast<const glm::vec4*>(data_ptr + buffer_view.offset + accessor.offset);
+                                break;
+
+                            default: break;
                         }
-                    };
-                    if (mesh.mTextureCoords[0]) {
-                        vertex.uv = {
-                            mesh.mTextureCoords[0][j].x,
-                            mesh.mTextureCoords[0][j].y
-                        };
+
+                        vertices.resize(vertex_count);
+                        for (auto l = 0_u32; l < vertex_count; ++l) {
+                            std::memcpy(&vertices[l].position, position_ptr + l, sizeof(glm::vec3));
+                            if (normal_ptr) {
+                                std::memcpy(&vertices[l].normal, normal_ptr + l, sizeof(glm::vec3));
+                            }
+                            if (uv_ptr) {
+                                std::memcpy(&vertices[l].uv, uv_ptr + l, sizeof(glm::vec2));
+                            }
+                            if (tangent_ptr) {
+                                std::memcpy(&vertices[l].tangent, tangent_ptr + l, sizeof(glm::vec4));
+                            }
+                        }
                     }
-                }
-                // indices processing
-                auto indices = std::vector<uint32>();
-                indices.reserve(mesh.mNumFaces * 3);
-                for (auto j = 0_u32; j < mesh.mNumFaces; ++j) {
-                    const auto& face = mesh.mFaces[j];
-                    for (auto k = 0_u32; k < face.mNumIndices; ++k) {
-                        indices.emplace_back(face.mIndices[k]);
+
+                    auto indices = std::vector<uint32>();
+                    {
+                        const auto& accessor = *primitive.indices;
+                        const auto& buffer_view = *accessor.buffer_view;
+                        const auto& buffer = *buffer_view.buffer;
+                        const auto& data_ptr = static_cast<const char*>(buffer.data);
+                        indices.reserve(accessor.count);
+                        switch (accessor.component_type) {
+                            case cgltf_component_type_r_8:
+                            case cgltf_component_type_r_8u: {
+                                const auto* ptr = reinterpret_cast<const uint8*>(data_ptr + buffer_view.offset + accessor.offset);
+                                std::ranges::copy(std::span(ptr, accessor.count), std::back_inserter(indices));
+                            } break;
+
+                            case cgltf_component_type_r_16:
+                            case cgltf_component_type_r_16u: {
+                                const auto* ptr = reinterpret_cast<const uint16*>(data_ptr + buffer_view.offset + accessor.offset);
+                                std::ranges::copy(std::span(ptr, accessor.count), std::back_inserter(indices));
+                            } break;
+
+                            case cgltf_component_type_r_32f:
+                            case cgltf_component_type_r_32u: {
+                                const auto* ptr = reinterpret_cast<const uint32*>(data_ptr + buffer_view.offset + accessor.offset);
+                                std::ranges::copy(std::span(ptr, accessor.count), std::back_inserter(indices));
+                            } break;
+
+                            default: break;
+                        }
                     }
-                }
-                // texture processing
-                auto textures = std::vector<std::reference_wrapper<const texture_t>>();
-                if (mesh.mMaterialIndex >= 0) {
-                    const auto& material = *scene->mMaterials[mesh.mMaterialIndex];
-                    const auto* diffuse_texture = import_texture(*scene, material, aiTextureType_DIFFUSE, root, model._textures);
-                    const auto* specular_texture = import_texture(*scene, material, aiTextureType_SPECULAR, root, model._textures);
+
+                    auto diffuse_texture_index = -1_u32;
+                    auto normal_texture_index = -1_u32;
+                    auto specular_texture_index = -1_u32;
+
+                    const auto& material = *primitive.material;
+                    const auto* diffuse_texture = material.pbr_metallic_roughness.base_color_texture.texture;
+                    const auto* normal_texture = material.normal_texture.texture;
+                    const auto* specular_texture = material.pbr_specular_glossiness.specular_glossiness_texture.texture;
+
                     if (diffuse_texture) {
-                        textures.emplace_back(std::cref(*diffuse_texture));
+                        auto diffuse_path = decode_texture_path(s_base_path, diffuse_texture->image);
+                        if (!diffuse_path.empty()) {
+                            diffuse_texture_index = texture_cache.at(diffuse_path);
+                        }
+                    }
+                    if (normal_texture) {
+                        auto normal_path = decode_texture_path(s_base_path, normal_texture->image);
+                        if (!normal_path.empty()) {
+                            normal_texture_index = texture_cache.at(normal_path);
+                        }
                     }
                     if (specular_texture) {
-                        textures.emplace_back(std::cref(*specular_texture));
+                        auto specular_path = decode_texture_path(s_base_path, specular_texture->image);
+                        if (!specular_path.empty()) {
+                            specular_texture_index = texture_cache.at(specular_path);
+                        }
                     }
+
+                    auto& m_mesh = model._meshes.emplace_back(mesh_pool.make_mesh(
+                        vertices,
+                        indices,
+                        vertex_format_as_attributes()));
+                    m_mesh.diffuse_texture = diffuse_texture_index;
+                    m_mesh.normal_texture = normal_texture_index;
+                    m_mesh.specular_texture = specular_texture_index;
+                    cgltf_node_transform_world(&node, glm::value_ptr(model._transforms.emplace_back(glm::identity<glm::mat4>())));
                 }
-                // transform processing
-                const auto* current = node;
-                auto transform = glm::identity<glm::mat4>();
-                while (current) {
-                    transform = transform * glm::transpose(glm::make_mat4(current->mTransformation[0]));
-                    current = current->mParent;
+
+                for (auto j = 0_u32; j < node.children_count; ++j) {
+                    nodes.push(node.children[j]);
                 }
-                // insert mesh
-                model._meshes.emplace_back(mesh_t::create(std::move(vertices), std::move(indices), std::move(textures), transform));
             }
         }
-        iris::log("loaded model: \"", path.string(), "\" has ", model._meshes.size(), " meshes and ", model._textures.size(), " textures");
+
+        iris::log("loaded model: \"", s_path, "\" has ", model._meshes.size(), " meshes and ", model._textures.size(), " textures");
         return model;
     }
 
@@ -158,9 +244,18 @@ namespace iris {
         return _meshes;
     }
 
+    auto model_t::transforms() const noexcept -> std::span<const glm::mat4> {
+        return _transforms;
+    }
+
+    auto model_t::textures() const noexcept -> std::span<const texture_t> {
+        return _textures;
+    }
+
     auto model_t::swap(self& other) noexcept -> void {
         using std::swap;
         swap(_meshes, other._meshes);
+        swap(_transforms, other._transforms);
         swap(_textures, other._textures);
     }
 } // namespace iris

@@ -164,12 +164,12 @@ int main() {
         window.cursor_position = {};
     });
 
-    auto color_attachment = iris::framebuffer_attachment_t::create(window.width, window.height, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+    auto color_attachment = iris::framebuffer_attachment_t::create(window.width, window.height, 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
     auto color_framebuffer = iris::framebuffer_t::create({
         std::cref(color_attachment)
     });
 
-    auto old_color = iris::framebuffer_attachment_t::create(window.width, window.height, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+    auto old_color = iris::framebuffer_attachment_t::create(window.width, window.height, 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
     auto old_color_framebuffer = iris::framebuffer_t::create({
         std::cref(old_color)
     });
@@ -277,12 +277,12 @@ int main() {
 
         if (window.is_resized) {
             window.is_resized = false;
-            color_attachment = iris::framebuffer_attachment_t::create(window.width, window.height, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+            color_attachment = iris::framebuffer_attachment_t::create(window.width, window.height, 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
             color_framebuffer = iris::framebuffer_t::create({
                 std::cref(color_attachment)
             });
 
-            old_color = iris::framebuffer_attachment_t::create(window.width, window.height, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+            old_color = iris::framebuffer_attachment_t::create(window.width, window.height, 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
             old_color_framebuffer = iris::framebuffer_t::create({
                 std::cref(old_color)
             });

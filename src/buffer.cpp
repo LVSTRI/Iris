@@ -8,6 +8,9 @@ namespace iris {
     buffer_t::buffer_t() noexcept = default;
 
     buffer_t::~buffer_t() noexcept {
+        if (_mapped) {
+            glUnmapNamedBuffer(_id);
+        }
         glDeleteBuffers(1, &_id);
     }
 
@@ -22,12 +25,11 @@ namespace iris {
 
     auto buffer_t::create(uint32 size, uint32 type, bool mapped) noexcept -> self {
         auto buffer = self();
-        glGenBuffers(1, &buffer._id);
-        glBindBuffer(type, buffer._id);
-        glBufferData(type, size, nullptr, GL_DYNAMIC_DRAW);
+        glCreateBuffers(1, &buffer._id);
+        glNamedBufferStorage(buffer._id, size, nullptr, GL_DYNAMIC_STORAGE_BIT);
 
         if (mapped) {
-            buffer._mapped = glMapBuffer(type, GL_WRITE_ONLY);
+            buffer._mapped = glMapNamedBuffer(buffer._id, GL_WRITE_ONLY);
         }
 
         buffer._type = type;
@@ -52,19 +54,20 @@ namespace iris {
         if (size == 0) {
             return *this;
         }
-        glBindBuffer(_type, _id);
-        glBufferSubData(_type, offset, size, data);
+        glNamedBufferSubData(_id, offset, size, data);
         return *this;
     }
 
-    auto buffer_t::bind_base(uint32 index) const noexcept -> const self& {
+    auto buffer_t::bind() const noexcept -> void {
         glBindBuffer(_type, _id);
+    }
+
+    auto buffer_t::bind_base(uint32 index) const noexcept -> const self& {
         glBindBufferBase(_type, index, _id);
         return *this;
     }
 
     auto buffer_t::bind_range(uint32 index, uint64 offset, uint64 size) const noexcept -> const self& {
-        glBindBuffer(_type, _id);
         glBindBufferRange(_type, index, _id, offset, size);
         return *this;
     }

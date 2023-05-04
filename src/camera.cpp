@@ -83,7 +83,7 @@ namespace iris {
     auto camera_t::update(iris::float32 dt) noexcept -> void {
         constexpr auto sensitivity = 0.1f;
         const auto& window = _window.get();
-        const auto speed = 2.5f * dt;
+        const auto speed = 7.5f * dt;
 
         // mouse input handling (rely on window_t to zero cursor position when mouse is not captured)
         const auto& [last_c_x, last_c_y, c_x, c_y] = window.cursor_position;

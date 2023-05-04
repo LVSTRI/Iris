@@ -23,6 +23,7 @@ namespace iris {
 
         auto write(const void* data, uint64 size, uint64 offset = 0) const noexcept -> const self&;
 
+        auto bind() const noexcept -> void;
         auto bind_base(uint32 index) const noexcept -> const self&;
         auto bind_range(uint32 index, uint64 offset, uint64 size) const noexcept -> const self&;
 

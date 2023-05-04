@@ -23,17 +23,11 @@ target_include_directories(stb INTERFACE deps/stb)
 add_subdirectory(deps/glm)
 target_compile_definitions(glm INTERFACE GLM_FORCE_AVX2)
 
-# Assimp setup
-set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
-set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(ASSIMP_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
-set(ASSIMP_INSTALL_PDB OFF CACHE BOOL "" FORCE)
-set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
-set(ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
-set(ASSIMP_NO_EXPORT ON CACHE BOOL "" FORCE)
-set(ASSIMP_BUILD_OBJ_IMPORTER ON CACHE BOOL "" FORCE)
-set(ASSIMP_BUILD_GLTF_IMPORTER ON CACHE BOOL "" FORCE)
-add_subdirectory(deps/assimp)
+# cgltf setup
+add_library(cgltf STATIC
+    deps/cgltf/cgltf.h
+    src/deps/cgltf.c)
+target_include_directories(cgltf PUBLIC deps/cgltf)
 
 add_library(Iris STATIC
     src/utilities.hpp
@@ -43,17 +37,19 @@ add_library(Iris STATIC
     src/texture.cpp
     src/camera.hpp
     src/camera.cpp
-    src/mesh.hpp
-    src/mesh.cpp
     src/model.hpp
     src/model.cpp
     src/framebuffer.hpp
     src/framebuffer.cpp
     src/debug_break.hpp
     src/buffer.hpp
-    src/buffer.cpp)
+    src/buffer.cpp
+    src/allocator.hpp
+    src/allocator.cpp
+    src/mesh_pool.cpp
+    src/mesh_pool.hpp)
 
-target_link_libraries(Iris PUBLIC glad glfw stb glm assimp)
+target_link_libraries(Iris PUBLIC glad glfw stb glm cgltf)
 target_include_directories(Iris PUBLIC src)
 
 add_executable(MousePicking src/2.1/main.cpp)
@@ -70,3 +66,6 @@ target_link_libraries(AdvancedLighting PUBLIC Iris)
 
 add_executable(BasicRaytracing src/4.2/main.cpp)
 target_link_libraries(BasicRaytracing PUBLIC Iris)
+
+add_executable(IndirectDrawing src/5.0/main.cpp)
+target_link_libraries(IndirectDrawing PUBLIC Iris)

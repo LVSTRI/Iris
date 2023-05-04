@@ -21,7 +21,7 @@ namespace iris {
         return *this;
     }
 
-    auto texture_t::create(const fs::path& path, texture_type_t type) noexcept -> self {
+    auto texture_t::create(const fs::path& path, texture_type_t type, bool make_resident) noexcept -> self {
         auto texture = self();
         auto width = 0_i32;
         auto height = 0_i32;
@@ -43,25 +43,31 @@ namespace iris {
             }
         }
 
-        glGenTextures(1, &texture._id);
-        glBindTexture(GL_TEXTURE_2D, texture._id);
+        glCreateTextures(GL_TEXTURE_2D, 1, &texture._id);
 
         if (!texture._is_opaque) {
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            glTextureParameteri(texture._id, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTextureParameteri(texture._id, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         } else {
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+            glTextureParameteri(texture._id, GL_TEXTURE_WRAP_S, GL_REPEAT);
+            glTextureParameteri(texture._id, GL_TEXTURE_WRAP_T, GL_REPEAT);
         }
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, 16.0f);
+        glTextureParameteri(texture._id, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTextureParameteri(texture._id, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTextureParameterf(texture._id, GL_TEXTURE_MAX_ANISOTROPY, 16.0f);
 
         const auto internal_format = type == texture_type_t::linear_srgb ? GL_RGBA8 : GL_SRGB8_ALPHA8;
-        glTexImage2D(GL_TEXTURE_2D, 0, internal_format, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-        glGenerateMipmap(GL_TEXTURE_2D);
+        const auto level_count = std::floor(std::log2(std::max(width, height))) + 1;
+        glTextureStorage2D(texture._id, level_count, internal_format, width, height);
+        glTextureSubImage2D(texture._id, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, data);
+        glGenerateTextureMipmap(texture._id);
         stbi_image_free(data);
 
+        if (make_resident) {
+            texture._handle = glGetTextureHandleARB(texture._id);
+            glMakeTextureHandleResidentARB(texture._handle);
+            texture._is_resident = true;
+        }
         return texture;
     }
 
@@ -81,13 +87,16 @@ namespace iris {
         return _channels;
     }
 
+    auto texture_t::handle() const noexcept -> uint64 {
+        return _handle;
+    }
+
     auto texture_t::is_opaque() const noexcept -> bool {
         return _is_opaque;
     }
 
     auto texture_t::bind(uint32 index) const noexcept -> void {
-        glActiveTexture(GL_TEXTURE0 + index);
-        glBindTexture(GL_TEXTURE_2D, _id);
+        glBindTextureUnit(index, _id);
     }
 
     auto texture_t::swap(self& other) noexcept -> void {
@@ -96,6 +105,8 @@ namespace iris {
         swap(other._width, _width);
         swap(other._height, _height);
         swap(other._channels, _channels);
+        swap(other._handle, _handle);
         swap(other._is_opaque, _is_opaque);
+        swap(other._is_resident, _is_resident);
     }
 } // namespace iris

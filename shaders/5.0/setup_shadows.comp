@@ -12,21 +12,27 @@ struct cascade_data_t {
 
 layout (local_size_x = CASCADE_COUNT, local_size_y = 1, local_size_z = 1) in;
 
-layout (location = 0) uniform int sdsm_enable;
+layout (location = 0) uniform int u_sdsm_enable = 1;
 
-layout (binding = 0, rg32f) uniform readonly restrict image2D depth;
+layout (binding = 0, rg32f) uniform readonly restrict image2D u_depth;
 
-layout (std140, binding = 1) uniform cascade_setup_data_t {
-    mat4 global_shadow_pv;
+layout (std140, binding = 1) uniform u_cascade_setup_data {
+    mat4 global_pv;
     mat4 inv_pv;
-    vec4 camera_right;
     vec4 light_dir;
-    float near;
-    float far;
     float resolution;
 } setup_data;
 
-layout (std430, binding = 2) writeonly restrict buffer cascade_output_t {
+layout (std140, binding = 2) uniform u_camera {
+    mat4 projection;
+    mat4 view;
+    mat4 pv;
+    vec3 position;
+    float near;
+    float far;
+} camera;
+
+layout (std430, binding = 3) writeonly restrict buffer u_cascade_output {
     cascade_data_t[CASCADE_COUNT] cascades;
 };
 
@@ -74,12 +80,12 @@ mat4 mat4_make_view(in vec3 eye, in vec3 center, in vec3 up) {
 //   - https://github.com/TheRealMJP/Shadows
 //   - https://johanmedestrom.wordpress.com/2016/03/18/opengl-cascaded-shadow-maps/
 void main() {
-    const float near_clip = setup_data.near;
-    const float far_clip = setup_data.far;
+    const float near_clip = camera.near;
+    const float far_clip = camera.far;
 
-    vec2 reduction_depth = imageLoad(depth, ivec2(0)).rg;
-    const float min_depth = bool(sdsm_enable) ? reduction_depth.x : 0.0;
-    const float max_depth = bool(sdsm_enable) ? reduction_depth.y : 1.0;
+    vec2 reduction_depth = imageLoad(u_depth, ivec2(0)).rg;
+    const float min_depth = bool(u_sdsm_enable) ? reduction_depth.x : 0.0;
+    const float max_depth = bool(u_sdsm_enable) ? reduction_depth.y : 1.0;
 
     float[] cascade_splits = float[CASCADE_COUNT](0.0, 0.0, 0.0, 0.0);
     // PSSM
@@ -180,7 +186,7 @@ void main() {
         vec4(0.0, 0.0, 0.5, 0.0),
         vec4(0.5, 0.5, 0.5, 1.0));
     const mat4 inv_cascade = inverse(tx_scale_bias * (light_proj * light_view));
-    const mat4 global_pv = setup_data.global_shadow_pv;
+    const mat4 global_pv = setup_data.global_pv;
     vec3[] cascade_corners = vec3[](
         vec3(inv_cascade * vec4(0.0, 0.0, 0.0, 1.0)),
         vec3(inv_cascade * vec4(1.0, 1.0, 1.0, 1.0)));

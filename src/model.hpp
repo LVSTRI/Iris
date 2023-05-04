@@ -2,13 +2,17 @@
 
 #include <utilities.hpp>
 
+#include <glm/mat4x4.hpp>
+
 #include <unordered_map>
 #include <filesystem>
 #include <vector>
 #include <span>
 
 namespace iris {
-    class mesh_t;
+    struct mesh_t;
+    class mesh_pool_t;
+
     class model_t {
     public:
         using self = model_t;
@@ -21,14 +25,17 @@ namespace iris {
         model_t(self&& other) noexcept;
         auto operator =(self&& other) noexcept -> self&;
 
-        static auto create(const fs::path& path) noexcept -> self;
+        static auto create(mesh_pool_t& mesh_pool, const fs::path& path) noexcept -> self;
 
         auto meshes() const noexcept -> std::span<const mesh_t>;
+        auto transforms() const noexcept -> std::span<const glm::mat4>;
+        auto textures() const noexcept -> std::span<const texture_t>;
 
         auto swap(self& other) noexcept -> void;
 
     private:
         std::vector<mesh_t> _meshes;
-        std::unordered_map<fs::path, texture_t> _textures;
+        std::vector<glm::mat4> _transforms;
+        std::vector<texture_t> _textures;
     };
 } // namespace iris
