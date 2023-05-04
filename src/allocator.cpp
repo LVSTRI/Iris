@@ -67,10 +67,15 @@ namespace iris {
         return *this;
     }
 
-    auto allocator_t::create() noexcept -> self {
+    auto allocator_t::create(uint64 capacity) noexcept -> self {
         auto allocator = self();
         allocator._blocks.emplace_back().insert({ 0, capacity });
+        allocator._capacity = capacity;
         return allocator;
+    }
+
+    auto allocator_t::capacity() const noexcept -> uint64 {
+        return _capacity;
     }
 
     auto allocator_t::allocate(uint64 size) noexcept -> buffer_slice_t {
@@ -130,12 +135,13 @@ namespace iris {
 
     auto allocator_t::is_block_empty(uint64 block) const noexcept -> bool {
         auto page = *_blocks[block].begin();
-        return page.size == capacity;
+        return page.size == _capacity;
     }
 
     auto allocator_t::swap(self& other) noexcept -> void {
         using std::swap;
         swap(_blocks, other._blocks);
+        swap(_capacity, other._capacity);
     }
 
     auto allocator_t::_find_best(uint64 size) noexcept -> std::pair<structure_type::iterator, uint64> {
@@ -157,7 +163,7 @@ namespace iris {
 
         // need to allocate more
         if (!success) {
-            _blocks.emplace_back().insert({ 0, capacity });
+            _blocks.emplace_back().insert({ 0, _capacity });
             best = _blocks.back().begin();
             id = _blocks.size();
         }

@@ -52,8 +52,6 @@ namespace iris {
         using self = allocator_t;
         using structure_type = std::set<page_t>;
 
-        constexpr static auto capacity = 256_MiB;
-
         allocator_t() noexcept;
         ~allocator_t() noexcept;
 
@@ -62,7 +60,9 @@ namespace iris {
         allocator_t(self&& other) noexcept;
         auto operator =(self&& other) noexcept -> self&;
 
-        static auto create() noexcept -> self;
+        static auto create(uint64 capacity) noexcept -> self;
+
+        auto capacity() const noexcept -> uint64;
 
         auto allocate(uint64 size) noexcept -> buffer_slice_t;
         auto free(const buffer_slice_t& block) noexcept -> void;
@@ -75,5 +75,6 @@ namespace iris {
         auto _find_best(uint64 size) noexcept -> std::pair<structure_type::iterator, uint64>;
 
         std::vector<structure_type> _blocks;
+        uint64 _capacity = 0;
     };
 } // namespace iris

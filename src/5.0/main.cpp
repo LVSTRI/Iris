@@ -108,18 +108,35 @@ static auto hash_combine(iris::uint64 seed, iris::uint64 value) noexcept -> iris
     return seed;
 }
 
-static auto group_indirect_commands(std::span<std::reference_wrapper<const iris::mesh_t>> meshes) noexcept
-    -> std::unordered_map<iris::uint64, std::vector<std::reference_wrapper<const iris::mesh_t>>> {
-    auto groups = std::unordered_map<iris::uint64, std::vector<std::reference_wrapper<const iris::mesh_t>>>();
-    for (const auto& mesh : meshes) {
-        auto& u_mesh = mesh.get();
-        auto hash = 0_u64;
-        hash = hash_combine(hash, u_mesh.vao);
-        hash = hash_combine(hash, u_mesh.vbo);
-        hash = hash_combine(hash, u_mesh.ebo);
-        hash = hash_combine(hash, u_mesh.vertex_slice.index());
-        hash = hash_combine(hash, u_mesh.index_slice.index());
-        groups[hash].push_back(mesh);
+struct indirect_group_t {
+    std::vector<std::reference_wrapper<const iris::mesh_t>> meshes;
+    iris::uint32 vao = 0;
+    iris::uint32 vbo = 0;
+    iris::uint32 ebo = 0;
+    iris::uint32 vertex_size = 0;
+    iris::uint32 model_index = 0;
+};
+
+static auto group_indirect_commands(std::span<const iris::model_t> models) noexcept
+    -> std::unordered_map<iris::uint64, indirect_group_t> {
+    auto groups = std::unordered_map<iris::uint64, indirect_group_t>();
+    auto model_index = 0_u32;
+    for (const auto& model : models) {
+        for (const auto& mesh : model.meshes()) {
+            auto hash = 0_u64;
+            hash = hash_combine(hash, mesh.vao);
+            hash = hash_combine(hash, mesh.vbo);
+            hash = hash_combine(hash, mesh.ebo);
+            hash = hash_combine(hash, mesh.vertex_slice.index());
+            hash = hash_combine(hash, mesh.index_slice.index());
+            groups[hash].meshes.push_back(std::cref(mesh));
+            groups[hash].vao = mesh.vao;
+            groups[hash].vbo = mesh.vbo;
+            groups[hash].ebo = mesh.ebo;
+            groups[hash].vertex_size = mesh.vertex_size;
+            groups[hash].model_index = model_index;
+        }
+        model_index++;
     }
     return groups;
 }
@@ -284,13 +301,14 @@ int main() {
 
     auto mesh_pool = iris::mesh_pool_t::create();
     auto models = std::vector<iris::model_t>();
-    //models.emplace_back(iris::model_t::create(mesh_pool, "../models/sponza/Sponza.gltf"));
-    models.emplace_back(iris::model_t::create(mesh_pool, "../models/bistro/bistro.gltf"));
+    models.emplace_back(iris::model_t::create(mesh_pool, "../models/sponza/Sponza.gltf"));
+    //models.emplace_back(iris::model_t::create(mesh_pool, "../models/bistro/bistro.gltf"));
     //models.emplace_back(iris::model_t::create(mesh_pool, "../models/san_miguel/san_miguel.gltf"));
 
     auto local_transforms = std::vector<glm::mat4>();
+    local_transforms.reserve(16384);
     for (const auto& model : models) {
-        local_transforms.insert(local_transforms.end(), model.transforms().begin(), model.transforms().end());
+        std::ranges::copy(model.transforms(), std::back_inserter(local_transforms));
     }
 
     auto global_transforms = std::vector<glm::mat4>();
@@ -425,18 +443,26 @@ int main() {
         delta_time = current_time - last_time;
         last_time = current_time;
 
-        /*directional_lights[0].direction = glm::normalize(glm::vec3(
-            0.25f * glm::cos(current_time * 0.5f),
+        directional_lights[0].direction = glm::normalize(glm::vec3(
+            0.33f * glm::cos(current_time * 0.5f),
             1.0f,
-            0.25f * glm::sin(current_time * 0.5f)));*/
+            0.33f * glm::sin(current_time * 0.5f)));
 
-        auto indirect_groups = group_indirect_commands(meshes);
+        auto object_infos = std::vector<object_info_t>();
+        object_infos.reserve(meshes.size());
+        auto indirect_groups = group_indirect_commands(models);
         {
+            auto model_index = 0_u32;
+            auto mesh_index = 0_u32;
             auto indirect_offset = 0_u32;
-            for (auto& group : indirect_groups) {
+            for (auto& [_, group] : indirect_groups) {
                 auto indirect_commands = std::vector<draw_elements_indirect_t>();
-                indirect_commands.reserve(group.second.size());
-                for (auto& mesh : group.second) {
+                indirect_commands.reserve(group.meshes.size());
+                for (auto& mesh : group.meshes) {
+                    auto texture_offset = 0_u32;
+                    for (auto i = 0_u32; i < group.model_index; ++i) {
+                        texture_offset += models[i].textures().size();
+                    }
                     auto& u_mesh = mesh.get();
                     indirect_commands.emplace_back(draw_elements_indirect_t {
                         static_cast<iris::uint32>(u_mesh.index_count),
@@ -445,31 +471,16 @@ int main() {
                         static_cast<iris::int32>(u_mesh.vertex_offset),
                         0
                     });
+                    object_infos.push_back({
+                        mesh_index,
+                        model_index,
+                        u_mesh.diffuse_texture + texture_offset,
+                        u_mesh.normal_texture + texture_offset,
+                        u_mesh.specular_texture + texture_offset,
+                    });
                 }
                 ibo.write(indirect_commands.data(), iris::size_bytes(indirect_commands), indirect_offset);
                 indirect_offset += iris::size_bytes(indirect_commands);
-            }
-        }
-
-        auto object_infos = std::vector<object_info_t>();
-        object_infos.reserve(meshes.size());
-        {
-            auto model_index = 0_u32;
-            auto mesh_index = 0_u32;
-            auto texture_offset = 0_u32;
-            for (const auto& model : models) {
-                for (const auto& mesh : model.meshes()) {
-                    object_infos.emplace_back(object_info_t {
-                        mesh_index,
-                        model_index,
-                        mesh.diffuse_texture + texture_offset,
-                        mesh.normal_texture + texture_offset,
-                        mesh.specular_texture + texture_offset,
-                    });
-                    mesh_index++;
-                }
-                model_index++;
-                texture_offset += model.textures().size();
             }
         }
 
@@ -523,19 +534,18 @@ int main() {
             auto indirect_offset = 0_u32;
             auto object_offset = 0_u32;
             for (auto& [_, group] : indirect_groups) {
-                auto& mesh = group.back().get();
                 depth_only_shader.set(0, { object_offset });
-                glBindVertexArray(mesh.vao);
-                glVertexArrayVertexBuffer(mesh.vao, 0, mesh.vbo, 0, mesh.vertex_size);
-                glVertexArrayElementBuffer(mesh.vao, mesh.ebo);
+                glBindVertexArray(group.vao);
+                glVertexArrayVertexBuffer(group.vao, 0, group.vbo, 0, group.vertex_size);
+                glVertexArrayElementBuffer(group.vao, group.ebo);
                 glMultiDrawElementsIndirect(
                     GL_TRIANGLES,
                     GL_UNSIGNED_INT,
                     reinterpret_cast<const void*>(indirect_offset),
-                    static_cast<iris::int32>(group.size()),
+                    static_cast<iris::int32>(group.meshes.size()),
                     0);
-                indirect_offset += group.size() * sizeof(draw_elements_indirect_t);
-                object_offset += group.size();
+                indirect_offset += group.meshes.size() * sizeof(draw_elements_indirect_t);
+                object_offset += group.meshes.size();
             }
         }
 
@@ -577,19 +587,18 @@ int main() {
             auto indirect_offset = 0_u32;
             auto object_offset = 0_u32;
             for (auto& [_, group] : indirect_groups) {
-                auto& mesh = group.back().get();
                 shadow_shader.set(1, { object_offset });
-                glBindVertexArray(mesh.vao);
-                glVertexArrayVertexBuffer(mesh.vao, 0, mesh.vbo, 0, mesh.vertex_size);
-                glVertexArrayElementBuffer(mesh.vao, mesh.ebo);
+                glBindVertexArray(group.vao);
+                glVertexArrayVertexBuffer(group.vao, 0, group.vbo, 0, group.vertex_size);
+                glVertexArrayElementBuffer(group.vao, group.ebo);
                 glMultiDrawElementsIndirect(
                     GL_TRIANGLES,
                     GL_UNSIGNED_INT,
                     reinterpret_cast<const void*>(indirect_offset),
-                    static_cast<iris::int32>(group.size()),
+                    static_cast<iris::int32>(group.meshes.size()),
                     0);
-                indirect_offset += group.size() * sizeof(draw_elements_indirect_t);
-                object_offset += group.size();
+                indirect_offset += group.meshes.size() * sizeof(draw_elements_indirect_t);
+                object_offset += group.meshes.size();
             }
         }
         //glCullFace(GL_BACK);
@@ -618,19 +627,18 @@ int main() {
                 .set(1, { 0_i32 })
                 .set(2, { 1_i32 });
             for (auto& [_, group] : indirect_groups) {
-                auto& mesh = group.back().get();
                 main_shader.set(0, { object_offset });
-                glBindVertexArray(mesh.vao);
-                glVertexArrayVertexBuffer(mesh.vao, 0, mesh.vbo, 0, mesh.vertex_size);
-                glVertexArrayElementBuffer(mesh.vao, mesh.ebo);
+                glBindVertexArray(group.vao);
+                glVertexArrayVertexBuffer(group.vao, 0, group.vbo, 0, group.vertex_size);
+                glVertexArrayElementBuffer(group.vao, group.ebo);
                 glMultiDrawElementsIndirect(
                     GL_TRIANGLES,
                     GL_UNSIGNED_INT,
                     reinterpret_cast<const void*>(indirect_offset),
-                    static_cast<iris::int32>(group.size()),
+                    static_cast<iris::int32>(group.meshes.size()),
                     0);
-                indirect_offset += group.size() * sizeof(draw_elements_indirect_t);
-                object_offset += group.size();
+                indirect_offset += group.meshes.size() * sizeof(draw_elements_indirect_t);
+                object_offset += group.meshes.size();
             }
         }
 

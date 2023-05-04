@@ -77,7 +77,7 @@ namespace iris {
         // either insert a new VAO + VBO or fetch from cache
         auto& vbp = _vbps[vertex_size];
         if (!vbp.vao) {
-            vbp.allocator = allocator_t::create();
+            vbp.allocator = allocator_t::create(256_MiB);
 
             glCreateVertexArrays(1, &vbp.vao);
             auto offset = 0_u32;
@@ -90,7 +90,7 @@ namespace iris {
 
             auto& vbo = vbp.vbos.emplace_back();
             glCreateBuffers(1, &vbo);
-            glNamedBufferStorage(vbo, allocator_t::capacity, nullptr, GL_DYNAMIC_STORAGE_BIT);
+            glNamedBufferStorage(vbo, vbp.allocator.capacity(), nullptr, GL_DYNAMIC_STORAGE_BIT);
             glVertexArrayVertexBuffer(vbp.vao, 0, vbo, 0, vertex_size);
         }
 
@@ -101,7 +101,7 @@ namespace iris {
         }
         if (!vbp.vbos[vertex_slice.index()]) {
             glCreateBuffers(1, &vbp.vbos[vertex_slice.index()]);
-            glNamedBufferStorage(vbp.vbos[vertex_slice.index()], allocator_t::capacity, nullptr, GL_DYNAMIC_STORAGE_BIT);
+            glNamedBufferStorage(vbp.vbos[vertex_slice.index()], vbp.allocator.capacity(), nullptr, GL_DYNAMIC_STORAGE_BIT);
             glVertexArrayVertexBuffer(vbp.vao, vertex_slice.index(), vbp.vbos[vertex_slice.index()], 0, vertex_size);
         }
         glNamedBufferSubData(vbp.vbos[vertex_slice.index()], vertex_slice.offset(), vertex_slice.size(), vertices.data());
@@ -113,7 +113,7 @@ namespace iris {
         }
         if (!_ebos[index_slice.index()]) {
             glCreateBuffers(1, &_ebos[index_slice.index()]);
-            glNamedBufferStorage(_ebos[index_slice.index()], allocator_t::capacity, nullptr, GL_DYNAMIC_STORAGE_BIT);
+            glNamedBufferStorage(_ebos[index_slice.index()], allocator.capacity(), nullptr, GL_DYNAMIC_STORAGE_BIT);
             glVertexArrayElementBuffer(vbp.vao, _ebos[index_slice.index()]);
         }
         glNamedBufferSubData(_ebos[index_slice.index()], index_slice.offset(), index_slice.size(), indices.data());
