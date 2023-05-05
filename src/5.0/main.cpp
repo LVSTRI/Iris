@@ -306,7 +306,7 @@ int main() {
     auto models = std::vector<iris::model_t>();
     //models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/sponza/sponza.glb"));
     models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/bistro/bistro.glb"));
-    //models.emplace_back(iris::model_t::create(mesh_pool, "../models/san_miguel/san_miguel.gltf"));
+    //models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/san_miguel/san_miguel.glb"));
     //models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/cube/cube.glb"));
 
     auto local_transforms = std::vector<glm::mat4>();
@@ -542,9 +542,16 @@ int main() {
         draw_count_buffer.bind_base(GL_SHADER_STORAGE_BUFFER, 5);
         object_index_shift_buffer.bind_base(6);
 
+        glClearNamedBufferSubData(
+            draw_count_buffer.id(),
+            GL_R32UI,
+            0,
+            draw_count_buffer.size(),
+            GL_RED_INTEGER,
+            GL_UNSIGNED_INT,
+            nullptr);
         glDispatchCompute((object_infos.size() + 255) / 256, 1, 1);
-        glMemoryBarrier(GL_ALL_BARRIER_BITS);
-        glFinish();
+        glMemoryBarrier(GL_SHADER_STORAGE_BUFFER | GL_COMMAND_BARRIER_BIT);
 
         glEnable(GL_DEPTH_TEST);
         glEnable(GL_CULL_FACE);

@@ -47,6 +47,10 @@ namespace iris {
         return path.generic_string();
     }
 
+    static auto is_texture_valid(const cgltf_texture* texture) noexcept {
+        return texture && texture->basisu_image && texture->basisu_image->buffer_view && texture->basisu_image->buffer_view->buffer;
+    }
+
     model_t::model_t() noexcept = default;
 
     model_t::~model_t() noexcept = default;
@@ -85,7 +89,7 @@ namespace iris {
 
         auto texture_cache = std::unordered_map<const void*, uint32>();
         const auto import_texture = [&](const cgltf_texture* texture, texture_type_t type) {
-            if (texture) {
+            if (is_texture_valid(texture)) {
                 const auto& image = *texture->basisu_image;
                 const auto& buffer_view = *image.buffer_view;
                 const auto& buffer = *buffer_view.buffer;
@@ -215,21 +219,21 @@ namespace iris {
                     const auto* normal_texture = material.normal_texture.texture;
                     const auto* specular_texture = material.pbr_specular_glossiness.specular_glossiness_texture.texture;
 
-                    if (diffuse_texture && diffuse_texture->basisu_image) {
+                    if (is_texture_valid(diffuse_texture)) {
                         const auto& image = *diffuse_texture->basisu_image;
                         const auto& buffer_view = *image.buffer_view;
                         const auto& buffer = *buffer_view.buffer;
                         const auto* ptr = static_cast<const uint8*>(buffer.data) + buffer_view.offset;
                         diffuse_texture_index = texture_cache.at(ptr);
                     }
-                    if (normal_texture && normal_texture->basisu_image) {
+                    if (is_texture_valid(normal_texture)) {
                         const auto& image = *normal_texture->basisu_image;
                         const auto& buffer_view = *image.buffer_view;
                         const auto& buffer = *buffer_view.buffer;
                         const auto* ptr = static_cast<const uint8*>(buffer.data) + buffer_view.offset;
                         normal_texture_index = texture_cache.at(ptr);
                     }
-                    if (specular_texture && specular_texture->basisu_image) {
+                    if (is_texture_valid(specular_texture)) {
                         const auto& image = *specular_texture->basisu_image;
                         const auto& buffer_view = *image.buffer_view;
                         const auto& buffer = *buffer_view.buffer;

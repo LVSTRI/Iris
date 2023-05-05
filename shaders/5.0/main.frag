@@ -113,7 +113,7 @@ vec3 sample_shadow(in vec3 shadow_frag_pos,
     const vec2 texel_size = 1.0 / shadow_size;
 
     //const vec2 bias_uv = calcualte_depth_plane_bias(ddx_shadow_frag_pos, ddy_shadow_frag_pos);
-    const float width = 0.005;
+    const float width = 0.0085;
     const vec3 halfway = normalize(light_dir + normal);
     float bias = max(
         clamp((width / 2.0) * tan(acos(abs(clamp(dot(normal, halfway), -1.0, 1.0)))), 0.0, width),
