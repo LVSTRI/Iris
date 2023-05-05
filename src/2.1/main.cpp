@@ -301,7 +301,7 @@ int main() {
     auto delta_time = 0.0f;
     auto last_frame = 0.0f;
 
-    const auto* hit_mesh = std::type_identity_t<const iris::mesh_t*>();
+    const auto* hit_mesh = (const iris::mesh_t*){};
 
     bool is_mouse_pressed[2] = {
         static_cast<bool>(glfwGetMouseButton(window.handle, GLFW_MOUSE_BUTTON_LEFT)),

@@ -26,7 +26,7 @@ namespace iris {
 
     auto texture_t::create_compressed(std::span<const uint8> data, texture_type_t type, bool make_resident) noexcept -> self {
         auto texture = self();
-        auto* ktx = std::type_identity_t<ktxTexture2*>();
+        auto* ktx = (ktxTexture2*)(nullptr);
         auto result = ktxTexture2_CreateFromMemory(&data[0], data.size(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktx);
         assert((result == KTX_SUCCESS) && "failed to load texture");
 

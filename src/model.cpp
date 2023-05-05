@@ -78,7 +78,7 @@ namespace iris {
         assert(fs::exists(opt_path) && "glTF mdel was not optimized");
 
         auto options = cgltf_options();
-        auto* gltf = std::type_identity_t<cgltf_data*>();
+        auto* gltf = (cgltf_data*)(nullptr);
         const auto s_path = opt_path.generic_string();
         cgltf_parse_file(&options, s_path.c_str(), &gltf);
         cgltf_load_buffers(&options, gltf, s_path.c_str());
@@ -126,10 +126,10 @@ namespace iris {
                 const auto& mesh = *node.mesh;
                 for (auto j = 0_u32; j < mesh.primitives_count; ++j) {
                     const auto& primitive = mesh.primitives[j];
-                    const auto* position_ptr = std::type_identity_t<glm::vec3*>();
-                    const auto* normal_ptr = std::type_identity_t<glm::vec3*>();
-                    const auto* uv_ptr = std::type_identity_t<glm::vec2*>();
-                    const auto* tangent_ptr = std::type_identity_t<glm::vec4*>();
+                    const auto* position_ptr = (glm::vec3*)(nullptr);
+                    const auto* normal_ptr = (glm::vec3*)(nullptr);
+                    const auto* uv_ptr = (glm::vec2*)(nullptr);
+                    const auto* tangent_ptr = (glm::vec4*)(nullptr);
 
                     auto vertices = std::vector<vertex_format_t>();
                     auto vertex_count = 0_u32;

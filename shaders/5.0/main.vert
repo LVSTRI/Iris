@@ -2,13 +2,30 @@
 
 invariant gl_Position;
 
+struct indirect_command_t {
+    uint count;
+    uint instance_count;
+    uint first_index;
+    int base_vertex;
+    uint base_instance;
+};
+
 struct object_info_t {
     uint local_transform;
     uint global_transform;
     uint diffuse_texture;
     uint normal_texture;
     uint specular_texture;
+    uint group_index;
+    uint group_offset;
+
+    indirect_command_t command;
 };
+
+struct object_index_shift_t {
+    uint object_id;
+};
+
 layout (location = 0) in vec3 i_position;
 layout (location = 1) in vec3 i_normal;
 layout (location = 2) in vec2 i_uv;
@@ -23,7 +40,7 @@ layout (location = 5) out vec2 o_uv;
 layout (location = 6) out vec3 o_frag_pos;
 layout (location = 7) out mat3 o_TBN;
 
-layout (location = 0) uniform uint object_offset;
+layout (location = 0) uniform uint group_offset;
 
 layout (std140, binding = 0) uniform u_camera {
     mat4 projection;
@@ -46,6 +63,10 @@ layout (std430, binding = 3) readonly restrict buffer b_object_info {
     object_info_t[] objects;
 };
 
+layout (std430, binding = 4) restrict buffer b_object_index_shift {
+    object_index_shift_t[] object_shift;
+};
+
 mat3 mat3_make_tbn(in mat3 transform) {
     const vec3 bitangent = cross(i_normal, i_tangent.xyz) * i_tangent.w;
     const vec3 T = normalize(transform * i_tangent.xyz);
@@ -55,7 +76,7 @@ mat3 mat3_make_tbn(in mat3 transform) {
 }
 
 void main() {
-    const object_info_t object_info = objects[object_offset + gl_DrawID];
+    const object_info_t object_info = objects[object_shift[gl_DrawID + group_offset].object_id];
     const mat4 global_transform = global_transforms[object_info.global_transform];
     const mat4 local_transform = local_transforms[object_info.local_transform];
     const mat4 transform = global_transform * local_transform;
@@ -66,7 +87,7 @@ void main() {
     o_specular_texture = object_info.specular_texture;
     o_normal = normalize(mat3(inv_transform) * i_normal);
     o_uv = i_uv;
-    o_draw_id = object_offset + gl_DrawID;
+    o_draw_id = group_offset + gl_DrawID;
     o_frag_pos = vec3(transform * vec4(i_position, 1.0));
     o_TBN = TBN;
     gl_Position = camera.pv * vec4(o_frag_pos, 1.0);

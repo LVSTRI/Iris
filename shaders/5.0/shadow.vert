@@ -10,12 +10,24 @@ struct cascade_data_t {
     vec4 offset; // w is split
 };
 
+struct indirect_command_t {
+    uint count;
+    uint instance_count;
+    uint first_index;
+    int base_vertex;
+    uint base_instance;
+};
+
 struct object_info_t {
     uint local_transform;
     uint global_transform;
     uint diffuse_texture;
     uint normal_texture;
     uint specular_texture;
+    uint group_index;
+    uint group_offset;
+
+    indirect_command_t command;
 };
 
 layout (location = 0) in vec3 i_position;

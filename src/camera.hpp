@@ -69,7 +69,7 @@ namespace iris {
         iris::float32 _pitch = 0.0f;
         iris::float32 _fov = 60.0f;
         iris::float32 _near = 0.1f;
-        iris::float32 _far = 100.0f;
+        iris::float32 _far = 512.0f;
 
         std::reference_wrapper<const window_t> _window;
     };

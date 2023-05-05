@@ -46,15 +46,15 @@ layout (std140, binding = 0) uniform u_camera {
     float far;
 } camera;
 
-layout (std140, binding = 4) uniform b_directional_lights {
+layout (std140, binding = 5) uniform b_directional_lights {
     directional_light_t[16] directional_lights;
 };
 
-layout (std430, binding = 5) readonly restrict buffer b_texture {
+layout (std430, binding = 6) readonly restrict buffer b_texture {
     sampler2D[] textures;
 };
 
-layout (std430, binding = 6) readonly restrict buffer b_cascade_output {
+layout (std430, binding = 7) readonly restrict buffer b_cascade_output {
     cascade_data_t[CASCADE_COUNT] cascades;
 };
 
@@ -113,7 +113,7 @@ vec3 sample_shadow(in vec3 shadow_frag_pos,
     const vec2 texel_size = 1.0 / shadow_size;
 
     //const vec2 bias_uv = calcualte_depth_plane_bias(ddx_shadow_frag_pos, ddy_shadow_frag_pos);
-    const float width = 0.0075;
+    const float width = 0.005;
     const vec3 halfway = normalize(light_dir + normal);
     float bias = max(
         clamp((width / 2.0) * tan(acos(abs(clamp(dot(normal, halfway), -1.0, 1.0)))), 0.0, width),
@@ -201,7 +201,7 @@ void main() {
     const float depth_vs = (camera.pv * vec4(i_frag_pos, 1.0)).w;
     const uint cascade = calculate_cascade(depth_vs);
 
-    //vec3 hsv = vec3(fract(M_GOLDEN_CONJ * (i_diffuse_texture + 1)), 0.5, 0.95);
+    //vec3 hsv = vec3(fract(M_GOLDEN_CONJ * (i_draw_id * gl_PrimitiveID + 1)), 0.875, 0.85);
     //if (i_diffuse_texture == -1) {
     //    hsv = vec3(0.0, 0.0, 0.0);
     //}

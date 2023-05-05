@@ -27,6 +27,10 @@ namespace iris {
         auto bind_base(uint32 index) const noexcept -> const self&;
         auto bind_range(uint32 index, uint64 offset, uint64 size) const noexcept -> const self&;
 
+        auto bind(uint32 type) const noexcept -> void;
+        auto bind_base(uint32 type, uint32 index) const noexcept -> const self&;
+        auto bind_range(uint32 type, uint32 index, uint64 offset, uint64 size) const noexcept -> const self&;
+
         auto swap(self& other) noexcept -> void;
 
     private:

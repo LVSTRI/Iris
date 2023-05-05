@@ -59,16 +59,28 @@ namespace iris {
     }
 
     auto buffer_t::bind() const noexcept -> void {
-        glBindBuffer(_type, _id);
+        bind(_type);
     }
 
     auto buffer_t::bind_base(uint32 index) const noexcept -> const self& {
-        glBindBufferBase(_type, index, _id);
-        return *this;
+        return bind_base(_type, index);
     }
 
     auto buffer_t::bind_range(uint32 index, uint64 offset, uint64 size) const noexcept -> const self& {
-        glBindBufferRange(_type, index, _id, offset, size);
+        return bind_range(_type, index, offset, size);
+    }
+
+    auto buffer_t::bind(uint32 type) const noexcept -> void {
+        glBindBuffer(type, _id);
+    }
+
+    auto buffer_t::bind_base(uint32 type, uint32 index) const noexcept -> const self& {
+        glBindBufferBase(type, index, _id);
+        return *this;
+    }
+
+    auto buffer_t::bind_range(uint32 type, uint32 index, uint64 offset, uint64 size) const noexcept -> const self& {
+        glBindBufferRange(type, index, _id, offset, size);
         return *this;
     }
 
