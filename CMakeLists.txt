@@ -29,6 +29,21 @@ add_library(cgltf STATIC
     src/deps/cgltf.c)
 target_include_directories(cgltf PUBLIC deps/cgltf)
 
+# meshoptimizer setup
+add_subdirectory(deps/meshoptimizer)
+
+# KTX-Software setup
+set(KTX_FEATURE_TESTS OFF CACHE BOOL "" FORCE)
+set(KTX_FEATURE_VULKAN OFF CACHE BOOL "" FORCE)
+set(KTX_FEATURE_GL_UPLOAD OFF CACHE BOOL "" FORCE)
+add_subdirectory(deps/KTX-Software)
+
+if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    target_compile_options(ktx PRIVATE /w)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    target_compile_options(ktx PRIVATE -march=native -Wno-error)
+endif()
+
 add_library(Iris STATIC
     src/utilities.hpp
     src/shader.hpp
@@ -49,7 +64,7 @@ add_library(Iris STATIC
     src/mesh_pool.cpp
     src/mesh_pool.hpp)
 
-target_link_libraries(Iris PUBLIC glad glfw stb glm cgltf)
+target_link_libraries(Iris PUBLIC glad glfw glm cgltf stb meshoptimizer ktx)
 target_include_directories(Iris PUBLIC src)
 
 add_executable(MousePicking src/2.1/main.cpp)

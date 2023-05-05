@@ -177,9 +177,9 @@ int main() {
 
     // texture loading
     auto textures = std::vector<iris::texture_t>();
-    textures.emplace_back(iris::texture_t::create("../textures/wall.jpg", iris::texture_type_t::non_linear_srgb));
-    textures.emplace_back(iris::texture_t::create("../textures/container.png", iris::texture_type_t::non_linear_srgb));
-    textures.emplace_back(iris::texture_t::create("../textures/container_specular.png", iris::texture_type_t::non_linear_srgb));
+    textures.emplace_back(iris::texture_t::create("../textures/wall.jpg", iris::texture_type_t::non_linear_r8g8b8a8_unorm));
+    textures.emplace_back(iris::texture_t::create("../textures/container.png", iris::texture_type_t::non_linear_r8g8b8a8_unorm));
+    textures.emplace_back(iris::texture_t::create("../textures/container_specular.png", iris::texture_type_t::non_linear_r8g8b8a8_unorm));
 
     auto meshes = std::vector<iris::mesh_t>();
     {

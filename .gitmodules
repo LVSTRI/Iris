@@ -7,12 +7,18 @@
 [submodule "deps/glm"]
 	path = deps/glm
 	url = https://github.com/g-truc/glm
-[submodule "deps/stb"]
-	path = deps/stb
-	url = https://github.com/nothings/stb
 [submodule "models/deccer-cubes"]
 	path = models/deccer-cubes
 	url = https://github.com/GraphicsProgramming/deccer-cubes
 [submodule "deps/cgltf"]
 	path = deps/cgltf
 	url = https://github.com/jkuhlmann/cgltf
+[submodule "deps/meshoptimizer"]
+	path = deps/meshoptimizer
+	url = https://github.com/zeux/meshoptimizer
+[submodule "deps/KTX-Software"]
+	path = deps/KTX-Software
+	url = https://github.com/KhronosGroup/KTX-Software
+[submodule "deps/stb"]
+	path = deps/stb
+	url = https://github.com/nothings/stb

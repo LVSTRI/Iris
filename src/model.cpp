@@ -63,21 +63,36 @@ namespace iris {
     // TODO: temporary, "model_t" should be a simple container, it should NOT upload things to the GPU nor invoke "mesh_pool_t"
     auto model_t::create(mesh_pool_t& mesh_pool, const fs::path& path) noexcept -> self {
         auto model = self();
+        auto opt_path = path;
+        if (!path.generic_string().contains("compressed")) {
+            auto root_path = path
+                .parent_path()
+                .parent_path();
+            opt_path =
+                root_path /
+                "compressed" /
+                path.stem() /
+                path.filename().replace_extension(".glb");
+        }
+
+        assert(fs::exists(opt_path) && "glTF mdel was not optimized");
+
         auto options = cgltf_options();
         auto* gltf = std::type_identity_t<cgltf_data*>();
-        const auto s_path = path.generic_string();
-        const auto s_base_path = path.parent_path().generic_string();
+        const auto s_path = opt_path.generic_string();
         cgltf_parse_file(&options, s_path.c_str(), &gltf);
         cgltf_load_buffers(&options, gltf, s_path.c_str());
 
-        auto texture_cache = std::unordered_map<std::string, uint32>();
+        auto texture_cache = std::unordered_map<const void*, uint32>();
         const auto import_texture = [&](const cgltf_texture* texture, texture_type_t type) {
             if (texture) {
-                const auto& image = texture->image;
-                const auto t_path = decode_texture_path(s_base_path, image);
-                if (fs::exists(t_path) && !texture_cache.contains(t_path)) {
-                    texture_cache[t_path] = model._textures.size();
-                    model._textures.emplace_back(texture_t::create(t_path, type));
+                const auto& image = *texture->basisu_image;
+                const auto& buffer_view = *image.buffer_view;
+                const auto& buffer = *buffer_view.buffer;
+                const auto* ptr = static_cast<const uint8*>(buffer.data) + buffer_view.offset;
+                if (!texture_cache.contains(ptr)) {
+                    texture_cache[ptr] = model._textures.size();
+                    model._textures.emplace_back(texture_t::create_compressed(std::span(ptr, buffer.size), type));
                 }
             }
         };
@@ -85,14 +100,14 @@ namespace iris {
             const auto& material = gltf->materials[i];
             const auto* texture = material.pbr_metallic_roughness.base_color_texture.texture;
             if (material.has_pbr_metallic_roughness) {
-                import_texture(texture, texture_type_t::non_linear_srgb);
+                import_texture(texture, texture_type_t::non_linear_r8g8b8a8_unorm);
             }
 
-            import_texture(material.normal_texture.texture, texture_type_t::linear_srgb);
+            import_texture(material.normal_texture.texture, texture_type_t::linear_r8g8b8_unorm);
 
             texture = material.pbr_specular_glossiness.specular_glossiness_texture.texture;
             if (material.has_pbr_specular_glossiness) {
-                import_texture(texture, texture_type_t::linear_srgb);
+                import_texture(texture, texture_type_t::linear_r8g8b8_unorm);
             }
         }
 
@@ -146,19 +161,18 @@ namespace iris {
 
                             default: break;
                         }
-
-                        vertices.resize(vertex_count);
-                        for (auto l = 0_u32; l < vertex_count; ++l) {
-                            std::memcpy(&vertices[l].position, position_ptr + l, sizeof(glm::vec3));
-                            if (normal_ptr) {
-                                std::memcpy(&vertices[l].normal, normal_ptr + l, sizeof(glm::vec3));
-                            }
-                            if (uv_ptr) {
-                                std::memcpy(&vertices[l].uv, uv_ptr + l, sizeof(glm::vec2));
-                            }
-                            if (tangent_ptr) {
-                                std::memcpy(&vertices[l].tangent, tangent_ptr + l, sizeof(glm::vec4));
-                            }
+                    }
+                    vertices.resize(vertex_count);
+                    for (auto l = 0_u32; l < vertex_count; ++l) {
+                        std::memcpy(&vertices[l].position, position_ptr + l, sizeof(glm::vec3));
+                        if (normal_ptr) {
+                            std::memcpy(&vertices[l].normal, normal_ptr + l, sizeof(glm::vec3));
+                        }
+                        if (uv_ptr) {
+                            std::memcpy(&vertices[l].uv, uv_ptr + l, sizeof(glm::vec2));
+                        }
+                        if (tangent_ptr) {
+                            std::memcpy(&vertices[l].tangent, tangent_ptr + l, sizeof(glm::vec4));
                         }
                     }
 
@@ -201,23 +215,26 @@ namespace iris {
                     const auto* normal_texture = material.normal_texture.texture;
                     const auto* specular_texture = material.pbr_specular_glossiness.specular_glossiness_texture.texture;
 
-                    if (diffuse_texture) {
-                        auto diffuse_path = decode_texture_path(s_base_path, diffuse_texture->image);
-                        if (!diffuse_path.empty()) {
-                            diffuse_texture_index = texture_cache.at(diffuse_path);
-                        }
+                    if (diffuse_texture && diffuse_texture->basisu_image) {
+                        const auto& image = *diffuse_texture->basisu_image;
+                        const auto& buffer_view = *image.buffer_view;
+                        const auto& buffer = *buffer_view.buffer;
+                        const auto* ptr = static_cast<const uint8*>(buffer.data) + buffer_view.offset;
+                        diffuse_texture_index = texture_cache.at(ptr);
                     }
-                    if (normal_texture) {
-                        auto normal_path = decode_texture_path(s_base_path, normal_texture->image);
-                        if (!normal_path.empty()) {
-                            normal_texture_index = texture_cache.at(normal_path);
-                        }
+                    if (normal_texture && normal_texture->basisu_image) {
+                        const auto& image = *normal_texture->basisu_image;
+                        const auto& buffer_view = *image.buffer_view;
+                        const auto& buffer = *buffer_view.buffer;
+                        const auto* ptr = static_cast<const uint8*>(buffer.data) + buffer_view.offset;
+                        normal_texture_index = texture_cache.at(ptr);
                     }
-                    if (specular_texture) {
-                        auto specular_path = decode_texture_path(s_base_path, specular_texture->image);
-                        if (!specular_path.empty()) {
-                            specular_texture_index = texture_cache.at(specular_path);
-                        }
+                    if (specular_texture && specular_texture->basisu_image) {
+                        const auto& image = *specular_texture->basisu_image;
+                        const auto& buffer_view = *image.buffer_view;
+                        const auto& buffer = *buffer_view.buffer;
+                        const auto* ptr = static_cast<const uint8*>(buffer.data) + buffer_view.offset;
+                        specular_texture_index = texture_cache.at(ptr);
                     }
 
                     auto& m_mesh = model._meshes.emplace_back(mesh_pool.make_mesh(

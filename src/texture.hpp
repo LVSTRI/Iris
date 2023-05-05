@@ -2,10 +2,14 @@
 
 #include <utilities.hpp>
 
+#include <span>
+
 namespace iris {
     enum class texture_type_t : uint32 {
-        linear_srgb,
-        non_linear_srgb,
+        linear_r8g8_unorm,
+        linear_r8g8b8_unorm,
+        linear_r8g8b8a8_unorm,
+        non_linear_r8g8b8a8_unorm,
     };
 
     class texture_t {
@@ -20,6 +24,7 @@ namespace iris {
         texture_t(self&& other) noexcept;
         auto operator =(self&& other) noexcept -> self&;
 
+        static auto create_compressed(std::span<const uint8> data, texture_type_t type, bool make_resident = true) noexcept -> self;
         static auto create(const fs::path& path, texture_type_t type, bool make_resident = true) noexcept -> self;
 
         auto id() const noexcept -> uint32;

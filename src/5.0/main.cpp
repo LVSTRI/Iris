@@ -30,8 +30,6 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
 
-#include <stb_image.h>
-
 #define CASCADE_COUNT 4
 
 using namespace iris::literals;
@@ -295,15 +293,16 @@ int main() {
     auto shadow_shader = iris::shader_t::create("../shaders/5.0/shadow.vert", "../shaders/5.0/shadow.frag");
     auto fullscreen_shader = iris::shader_t::create("../shaders/5.0/fullscreen.vert", "../shaders/5.0/fullscreen.frag");
 
-    auto blue_noise_texture = iris::texture_t::create("../textures/1024_1024/LDR_RGBA_0.png", iris::texture_type_t::linear_srgb);
+    auto blue_noise_texture = iris::texture_t::create("../textures/1024_1024/LDR_RGBA_0.png", iris::texture_type_t::linear_r8g8b8_unorm);
 
     auto camera = iris::camera_t::create(window);
 
     auto mesh_pool = iris::mesh_pool_t::create();
     auto models = std::vector<iris::model_t>();
-    models.emplace_back(iris::model_t::create(mesh_pool, "../models/sponza/Sponza.gltf"));
-    //models.emplace_back(iris::model_t::create(mesh_pool, "../models/bistro/bistro.gltf"));
+    //models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/sponza/sponza.glb"));
+    models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/bistro/bistro.glb"));
     //models.emplace_back(iris::model_t::create(mesh_pool, "../models/san_miguel/san_miguel.gltf"));
+    //models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/cube/cube.glb"));
 
     auto local_transforms = std::vector<glm::mat4>();
     local_transforms.reserve(16384);
@@ -324,7 +323,7 @@ int main() {
 
     auto directional_lights = std::vector<directional_light_t>();
     directional_lights.push_back({
-        .direction = glm::normalize(glm::vec3(0.33f, 1.0f, 0.5f)),
+        .direction = glm::normalize(glm::vec3(-0.375f, 1.0f, 0.45f)),
         .diffuse = glm::vec3(1.0f, 1.0f, 1.0f),
         .specular = glm::vec3(1.0f, 1.0f, 1.0f)
     });
@@ -443,10 +442,10 @@ int main() {
         delta_time = current_time - last_time;
         last_time = current_time;
 
-        directional_lights[0].direction = glm::normalize(glm::vec3(
+        /*directional_lights[0].direction = glm::normalize(glm::vec3(
             0.33f * glm::cos(current_time * 0.5f),
             1.0f,
-            0.33f * glm::sin(current_time * 0.5f)));
+            0.33f * glm::sin(current_time * 0.5f)));*/
 
         auto object_infos = std::vector<object_info_t>();
         object_infos.reserve(meshes.size());
