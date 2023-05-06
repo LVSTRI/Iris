@@ -28,6 +28,26 @@ namespace iris {
         void update() noexcept;
     };
 
+    struct alignas(16) plane_t {
+        glm::vec3 normal = {};
+        iris::float32 distance = 0;
+
+        plane_t() noexcept = default;
+
+        plane_t(const glm::vec3& n, const glm::vec3& p) noexcept
+            : normal(glm::normalize(n)),
+              distance(glm::dot(normal, p)) {}
+    };
+
+    struct frustum_t {
+        plane_t near = {};
+        plane_t far = {};
+        plane_t right = {};
+        plane_t left = {};
+        plane_t top = {};
+        plane_t bottom = {};
+    };
+
     class camera_t {
     public:
         using self = camera_t;
@@ -73,4 +93,7 @@ namespace iris {
 
         std::reference_wrapper<const window_t> _window;
     };
+
+    auto make_perspective_frustum(const glm::mat4& view, float32 fov, float32 aspect, float32 near, float32 far) noexcept -> frustum_t;
+
 } // namespace iris

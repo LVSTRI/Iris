@@ -408,7 +408,7 @@ int main() {
     auto transforms = std::vector<std::array<glm::mat4, 2>>();
     {
         for (auto model_id = 0_u32; const auto& model : models) {
-            for (const auto& mesh : model.meshes()) {
+            for (const auto& mesh : model.objects()) {
                 auto transform = mesh.transform();
                 transform = local_transforms[model_id] * transform;
                 transforms.emplace_back(std::to_array({ transform, glm::inverseTranspose(transform) }));
@@ -657,7 +657,7 @@ int main() {
         {
             auto mesh_id = 0_u32;
             for (const auto& model : models) {
-                for (const auto& mesh : model.meshes()) {
+                for (const auto& mesh : model.objects()) {
                     auto is_opaque = true;
                     for (const auto& texture : mesh.textures()) {
                         if (!texture.get().is_opaque()) {
@@ -863,7 +863,7 @@ int main() {
             line_shader.bind();
             camera_buffer.bind_base(0);
             for (const auto& model : models) {
-                for (const auto& mesh : model.meshes()) {
+                for (const auto& mesh : model.objects()) {
                     const auto& aabb = mesh.aabb();
                     auto transform = glm::identity<glm::mat4>();
                     transform = glm::translate(transform, aabb.center);

@@ -10,6 +10,13 @@ struct indirect_command_t {
     uint base_instance;
 };
 
+struct aabb_t {
+    vec4 min;
+    vec4 max;
+    vec4 center;
+    vec4 size;
+};
+
 struct object_info_t {
     uint local_transform;
     uint global_transform;
@@ -19,6 +26,7 @@ struct object_info_t {
     uint group_index;
     uint group_offset;
 
+    aabb_t aabb;
     indirect_command_t command;
 };
 

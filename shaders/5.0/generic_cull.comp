@@ -9,6 +9,13 @@ struct indirect_command_t {
     uint base_instance;
 };
 
+struct aabb_t {
+    vec4 min;
+    vec4 max;
+    vec4 center;
+    vec4 extent;
+};
+
 struct object_info_t {
     uint local_transform;
     uint global_transform;
@@ -18,6 +25,7 @@ struct object_info_t {
     uint group_index;
     uint group_offset;
 
+    aabb_t aabb;
     indirect_command_t command;
 };
 
@@ -29,15 +37,13 @@ layout (local_size_x = INVOCATION_SIZE, local_size_y = 1, local_size_z = 1) in;
 
 layout (location = 0) uniform uint u_draw_count;
 layout (location = 1) uniform uint u_object_count;
+layout (location = 2) uniform uint u_disable_frustum_culling;
 
-layout (std140, binding = 0) uniform u_camera {
-    mat4 projection;
-    mat4 view;
-    mat4 pv;
-    vec3 position;
-    float near;
-    float far;
-} camera;
+layout (std430, binding = 0) readonly restrict buffer b_frustum {
+    // xyz => normal
+    // w => distance
+    vec4[6] planes;
+} frustum;
 
 layout (std430, binding = 1) readonly restrict buffer b_local_transform {
     mat4[] local_transforms;
@@ -63,7 +69,45 @@ layout (std430, binding = 6) writeonly restrict buffer b_object_index_shift {
     object_index_shift_t[] object_shift;
 };
 
+bool is_aabb_inside_plane(in aabb_t aabb, in vec4 plane) {
+    const vec3 normal = plane.xyz;
+    const vec3 extent = aabb.extent.xyz;
+    const vec3 center = aabb.center.xyz;
+    const float radius = dot(extent, abs(normal));
+    return -radius <= (dot(normal, center) - plane.w);
+}
+
 bool is_object_visible(in object_info_t object, in mat4 model) {
+    const aabb_t aabb = object.aabb;
+    const vec3 world_aabb_center = vec3(model * vec4(aabb.center.xyz, 1.0));
+    const vec3 right = vec3(model[0]) * aabb.extent.x;
+    const vec3 up = vec3(model[1]) * aabb.extent.y;
+    const vec3 forward = vec3(-model[2]) * aabb.extent.z;
+
+    const vec3 half_extent = vec3(
+        abs(dot(vec3(1, 0, 0), right)) +
+        abs(dot(vec3(1, 0, 0), up)) +
+        abs(dot(vec3(1, 0, 0), forward)),
+
+        abs(dot(vec3(0, 1, 0), right)) +
+        abs(dot(vec3(0, 1, 0), up)) +
+        abs(dot(vec3(0, 1, 0), forward)),
+
+        abs(dot(vec3(0, 0, 1), right)) +
+        abs(dot(vec3(0, 0, 1), up)) +
+        abs(dot(vec3(0, 0, 1), forward)));
+
+    const aabb_t world_aabb = aabb_t(
+        vec4(1.0),
+        vec4(1.0),
+        vec4(world_aabb_center, 1.0),
+        vec4(half_extent, 1.0));
+    for (uint i = 0; i < 6; ++i) {
+        if (!is_aabb_inside_plane(world_aabb, frustum.planes[i])) {
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -74,8 +118,9 @@ void main() {
         const mat4 local_transform = local_transforms[object.local_transform];
         const mat4 global_transform = global_transforms[object.global_transform];
         const mat4 model = global_transform * local_transform;
-        if (is_object_visible(object, model)) {
+        if (bool(u_disable_frustum_culling) || is_object_visible(object, model)) {
             const uint slot = atomicAdd(draw_count[object.group_index], 1);
+            // slot translates to gl_DrawID
             indirect_commands[slot + object.group_offset] = object.command;
             object_shift[slot + object.group_offset].object_id = index;
         }

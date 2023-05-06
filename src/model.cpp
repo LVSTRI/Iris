@@ -67,23 +67,10 @@ namespace iris {
     // TODO: temporary, "model_t" should be a simple container, it should NOT upload things to the GPU nor invoke "mesh_pool_t"
     auto model_t::create(mesh_pool_t& mesh_pool, const fs::path& path) noexcept -> self {
         auto model = self();
-        auto opt_path = path;
-        if (!path.generic_string().contains("compressed")) {
-            auto root_path = path
-                .parent_path()
-                .parent_path();
-            opt_path =
-                root_path /
-                "compressed" /
-                path.stem() /
-                path.filename().replace_extension(".glb");
-        }
-
-        assert(fs::exists(opt_path) && "glTF mdel was not optimized");
 
         auto options = cgltf_options();
         auto* gltf = (cgltf_data*)(nullptr);
-        const auto s_path = opt_path.generic_string();
+        const auto s_path = path.generic_string();
         cgltf_parse_file(&options, s_path.c_str(), &gltf);
         cgltf_load_buffers(&options, gltf, s_path.c_str());
 
@@ -166,6 +153,9 @@ namespace iris {
                             default: break;
                         }
                     }
+                    auto aabb = aabb_t();
+                    aabb.min = glm::vec3(std::numeric_limits<float>::max());
+                    aabb.max = glm::vec3(std::numeric_limits<float>::lowest());
                     vertices.resize(vertex_count);
                     for (auto l = 0_u32; l < vertex_count; ++l) {
                         std::memcpy(&vertices[l].position, position_ptr + l, sizeof(glm::vec3));
@@ -178,7 +168,12 @@ namespace iris {
                         if (tangent_ptr) {
                             std::memcpy(&vertices[l].tangent, tangent_ptr + l, sizeof(glm::vec4));
                         }
+
+                        aabb.min = glm::min(aabb.min, vertices[l].position);
+                        aabb.max = glm::max(aabb.max, vertices[l].position);
                     }
+                    aabb.center = (aabb.min + aabb.max) / 2.0f;
+                    aabb.extent = aabb.max - aabb.center;
 
                     auto indices = std::vector<uint32>();
                     {
@@ -241,13 +236,13 @@ namespace iris {
                         specular_texture_index = texture_cache.at(ptr);
                     }
 
-                    auto& m_mesh = model._meshes.emplace_back(mesh_pool.make_mesh(
-                        vertices,
-                        indices,
-                        vertex_format_as_attributes()));
-                    m_mesh.diffuse_texture = diffuse_texture_index;
-                    m_mesh.normal_texture = normal_texture_index;
-                    m_mesh.specular_texture = specular_texture_index;
+                    auto m_mesh = mesh_pool.make_mesh(vertices, indices, vertex_format_as_attributes());
+                    auto& object = model._objects.emplace_back();
+                    object.mesh = std::move(m_mesh);
+                    object.aabb = aabb;
+                    object.diffuse_texture = diffuse_texture_index;
+                    object.normal_texture = normal_texture_index;
+                    object.specular_texture = specular_texture_index;
                     cgltf_node_transform_world(&node, glm::value_ptr(model._transforms.emplace_back(glm::identity<glm::mat4>())));
                 }
 
@@ -257,12 +252,12 @@ namespace iris {
             }
         }
 
-        iris::log("loaded model: \"", s_path, "\" has ", model._meshes.size(), " meshes and ", model._textures.size(), " textures");
+        iris::log("loaded model: \"", s_path, "\" has ", model._objects.size(), " objects and ", model._textures.size(), " textures");
         return model;
     }
 
-    auto model_t::meshes() const noexcept -> std::span<const mesh_t> {
-        return _meshes;
+    auto model_t::objects() const noexcept -> std::span<const object_t> {
+        return _objects;
     }
 
     auto model_t::transforms() const noexcept -> std::span<const glm::mat4> {
@@ -275,7 +270,7 @@ namespace iris {
 
     auto model_t::swap(self& other) noexcept -> void {
         using std::swap;
-        swap(_meshes, other._meshes);
+        swap(_objects, other._objects);
         swap(_transforms, other._transforms);
         swap(_textures, other._textures);
     }

@@ -18,6 +18,13 @@ struct indirect_command_t {
     uint base_instance;
 };
 
+struct aabb_t {
+    vec4 min;
+    vec4 max;
+    vec4 center;
+    vec4 size;
+};
+
 struct object_info_t {
     uint local_transform;
     uint global_transform;
@@ -27,7 +34,12 @@ struct object_info_t {
     uint group_index;
     uint group_offset;
 
+    aabb_t aabb;
     indirect_command_t command;
+};
+
+struct object_index_shift_t {
+    uint object_id;
 };
 
 layout (location = 0) in vec3 i_position;
@@ -39,7 +51,7 @@ layout (location = 0) out flat uint o_diffuse_texture;
 layout (location = 1) out vec2 o_uv;
 
 layout (location = 0) uniform uint layer;
-layout (location = 1) uniform uint object_offset;
+layout (location = 1) uniform uint group_offset;
 
 layout (std430, binding = 0) readonly restrict buffer b_cascade_output {
     cascade_data_t[CASCADE_COUNT] cascades;
@@ -57,8 +69,12 @@ layout (std430, binding = 3) readonly restrict buffer b_object_info {
     object_info_t[] objects;
 };
 
+layout (std430, binding = 4) restrict buffer b_object_index_shift {
+    object_index_shift_t[] object_shift;
+};
+
 void main() {
-    const object_info_t object_info = objects[object_offset + gl_DrawID];
+    const object_info_t object_info = objects[object_shift[gl_DrawID + group_offset].object_id];
     const mat4 global_transform = global_transforms[object_info.global_transform];
     const mat4 local_transform = local_transforms[object_info.local_transform];
     const mat4 transform = global_transform * local_transform;

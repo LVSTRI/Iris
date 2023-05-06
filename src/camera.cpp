@@ -136,4 +136,27 @@ namespace iris {
         // use the right vector, orthogonal to the front vector, to get the actual up vector.
         _up = glm::normalize(glm::cross(_right, _front));
     }
+
+    auto make_perspective_frustum(const glm::mat4& view, float32 fov, float32 aspect, float32 near, float32 far) noexcept -> frustum_t {
+        auto frustum = frustum_t();
+        const auto inv_view = glm::inverse(view);
+        const auto half_vertical = far * glm::tan(fov / 2.0f);
+        const auto half_horizontal = aspect * half_vertical;
+        const auto right = glm::vec3(inv_view[0]);
+        const auto up = glm::vec3(inv_view[1]);
+        const auto front = glm::vec3(-inv_view[2]);
+        const auto position = glm::vec3(inv_view[3]);
+
+        const auto front_far = front * far;
+        const auto front_near = front * near;
+
+        frustum.near = plane_t(front, front_near + position);
+        frustum.far = plane_t(-front, front_far + position);
+        frustum.right = plane_t(glm::cross(front_far - right * half_horizontal, up), position);
+        frustum.left = plane_t(glm::cross(up, front_far + right * half_horizontal), position);
+        frustum.top = plane_t(glm::cross(right, front_far - up * half_vertical), position);
+        frustum.bottom = plane_t(glm::cross(front_far + up * half_vertical, right), position);
+
+        return frustum;
+    }
 } // namespace iris

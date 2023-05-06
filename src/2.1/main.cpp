@@ -353,7 +353,7 @@ int main() {
                 auto t_best = std::numeric_limits<iris::float32>::max();
 
                 for (const auto& model : models) {
-                    for (const auto& mesh : model.meshes()) {
+                    for (const auto& mesh : model.objects()) {
                         // transform the aabb extents to world space
                         const auto& aabb = mesh.aabb();
                         const auto world_aabb_min = mesh.transform() * glm::vec4(aabb.min, 1.0f);
@@ -407,7 +407,7 @@ int main() {
         // debug AABBs
         if (glfwGetKey(window.handle, GLFW_KEY_F) == GLFW_PRESS) {
             for (const auto& model : models) {
-                for (const auto& mesh : model.meshes()) {
+                for (const auto& mesh : model.objects()) {
                     const auto& aabb = mesh.aabb();
                     auto transform = glm::identity<glm::mat4>();
                     transform = glm::translate(transform, aabb.center);
@@ -456,7 +456,7 @@ int main() {
         const auto view = camera.view();
 
         for (auto i = 0_u32; const auto& model : models) {
-            for (const auto& mesh : model.meshes()) {
+            for (const auto& mesh : model.objects()) {
                 auto transform = mesh.transform();
                 auto t_inv_transform = glm::inverseTranspose(transform);
 

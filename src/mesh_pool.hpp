@@ -20,11 +20,6 @@ namespace iris {
         uint32 vao = 0;
         uint32 vbo = 0;
         uint32 ebo = 0;
-
-        // NOT OpenGL handles
-        uint32 diffuse_texture = 0;
-        uint32 normal_texture = 0;
-        uint32 specular_texture = 0;
     };
 
     // assumed all components are type = GL_FLOAT and binding = 0

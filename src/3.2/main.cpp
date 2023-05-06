@@ -226,7 +226,7 @@ int main() {
 
     auto transforms = std::vector<std::array<glm::mat4, 2>>();
     for (const auto& model : models) {
-        for (const auto& mesh : model.meshes()) {
+        for (const auto& mesh : model.objects()) {
             transforms.emplace_back(std::to_array({ mesh.transform(), glm::inverseTranspose(mesh.transform())} ));
         }
     }
@@ -357,7 +357,7 @@ int main() {
         {
             auto mesh_id = 0_u32;
             for (const auto& model : models) {
-                for (const auto& mesh : model.meshes()) {
+                for (const auto& mesh : model.objects()) {
                     auto is_opaque = true;
                     for (const auto& texture : mesh.textures()) {
                         if (!texture.get().is_opaque()) {
@@ -411,7 +411,7 @@ int main() {
                 {
                     auto mesh_id = 0_u32;
                     for (const auto& model : models) {
-                        for (const auto& mesh : model.meshes()) {
+                        for (const auto& mesh : model.objects()) {
                             // transform the aabb extents to world space
                             const auto& aabb = mesh.aabb();
                             const auto world_aabb_min = transforms[mesh_id][0] * glm::vec4(aabb.min, 1.0f);
@@ -544,7 +544,7 @@ int main() {
         if (glfwGetKey(window.handle, GLFW_KEY_F) == GLFW_PRESS) {
             auto mesh_id = 0_u32;
             for (const auto& model : models) {
-                for (const auto& mesh : model.meshes()) {
+                for (const auto& mesh : model.objects()) {
                     const auto& aabb = mesh.aabb();
                     auto transform = glm::identity<glm::mat4>();
                     transform = glm::translate(transform, aabb.center);

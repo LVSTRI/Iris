@@ -318,7 +318,7 @@ int main() {
 
         auto scene = scene_t();
         for (const auto& model : models) {
-            for (const auto& mesh : model.meshes()) {
+            for (const auto& mesh : model.objects()) {
                 auto is_opaque = true;
                 for (const auto& texture : mesh.textures()) {
                     if (!texture.get().is_opaque()) {
@@ -359,7 +359,7 @@ int main() {
         // debug AABBs
         if (glfwGetKey(window.handle, GLFW_KEY_F) == GLFW_PRESS) {
             for (const auto& model : models) {
-                for (const auto& mesh : model.meshes()) {
+                for (const auto& mesh : model.objects()) {
                     const auto& aabb = mesh.aabb();
                     auto transform = glm::identity<glm::mat4>();
                     transform = glm::translate(transform, aabb.center);
