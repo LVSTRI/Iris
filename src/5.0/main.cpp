@@ -65,6 +65,7 @@ struct object_info_t {
     iris::uint32 group_index = 0;
     iris::uint32 group_offset = 0;
 
+    glm::vec4 sphere = {};
     iris::aabb_t aabb = {};
     draw_elements_indirect_t command = {};
 };
@@ -307,8 +308,8 @@ int main() {
 
     auto mesh_pool = iris::mesh_pool_t::create();
     auto models = std::vector<iris::model_t>();
-    models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/sponza/sponza.glb"));
-    //models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/bistro/bistro.glb"));
+    //models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/sponza/sponza.glb"));
+    models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/bistro/bistro.glb"));
     //models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/san_miguel/san_miguel.glb"));
     //models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/cube/cube.glb"));
 
@@ -331,7 +332,7 @@ int main() {
 
     auto directional_lights = std::vector<directional_light_t>();
     directional_lights.push_back({
-        .direction = glm::normalize(glm::vec3(0.375f, 1.0f, -0.45f)),
+        .direction = glm::normalize(glm::vec3(-0.375f, 1.0f, 0.45f)),
         .diffuse = glm::vec3(1.0f, 1.0f, 1.0f),
         .specular = glm::vec3(1.0f, 1.0f, 1.0f)
     });
@@ -487,6 +488,7 @@ int main() {
                         u_object.specular_texture + texture_offset,
                         group_index,
                         group_offset,
+                        u_object.sphere,
                         u_object.aabb,
                         command
                     });
@@ -523,12 +525,7 @@ int main() {
             .resolution = static_cast<iris::float32>(shadow_attachment.width()),
         }), sizeof(cascade_setup_data_t));
 
-        const auto camera_frustum = iris::make_perspective_frustum(
-            camera.view(),
-            camera.fov(),
-            camera.aspect(),
-            camera.near(),
-            camera.far());
+        const auto camera_frustum = iris::make_perspective_frustum(camera.projection() * camera.view());
         frustum_buffer.write(iris::as_const_ptr(camera_frustum), iris::size_bytes(camera_frustum));
         local_transform_buffer.write(local_transforms.data(), iris::size_bytes(local_transforms));
         global_transform_buffer.write(global_transforms.data(), iris::size_bytes(global_transforms));
@@ -540,7 +537,8 @@ int main() {
             .bind()
             .set(0, { static_cast<iris::uint32>(indirect_groups.size()) })
             .set(1, { static_cast<iris::uint32>(object_infos.size()) })
-            .set(2, { 0_u32 });
+            .set(2, { 0_u32 })
+            .set(3, { 0_u32 });
         frustum_buffer.bind_range(0, 0, iris::size_bytes(camera_frustum));
         local_transform_buffer.bind_range(1, 0, iris::size_bytes(local_transforms));
         global_transform_buffer.bind_range(2, 0, iris::size_bytes(global_transforms));
@@ -623,13 +621,15 @@ int main() {
         glDispatchCompute(1, 1, 1);
         glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 
+        //glCullFace(GL_FRONT);
         for (auto layer = 0_u32; layer < CASCADE_COUNT; layer++) {
             // cull first
             cull_shader
                 .bind()
                 .set(0, { static_cast<iris::uint32>(indirect_groups.size()) })
                 .set(1, { static_cast<iris::uint32>(object_infos.size()) })
-                .set(2, { 1_u32 });
+                .set(2, { 0_u32 })
+                .set(3, { 1_u32 });
             frustum_buffer.bind_range(0, (layer + 1) * sizeof(iris::frustum_t), sizeof(iris::frustum_t));
             local_transform_buffer.bind_range(1, 0, iris::size_bytes(local_transforms));
             global_transform_buffer.bind_range(2, 0, iris::size_bytes(global_transforms));
@@ -686,6 +686,7 @@ int main() {
                 group_count_offset += sizeof(iris::uint32);
             }
         }
+        //glCullFace(GL_BACK);
 
         glViewport(0, 0, window.width, window.height);
         glDepthMask(GL_FALSE);
@@ -695,7 +696,8 @@ int main() {
             .bind()
             .set(0, { static_cast<iris::uint32>(indirect_groups.size()) })
             .set(1, { static_cast<iris::uint32>(object_infos.size()) })
-            .set(2, { 0_u32 });
+            .set(2, { 0_u32 })
+            .set(3, { 0_u32 });
         frustum_buffer.bind_range(0, 0, iris::size_bytes(camera_frustum));
         local_transform_buffer.bind_range(1, 0, iris::size_bytes(local_transforms));
         global_transform_buffer.bind_range(2, 0, iris::size_bytes(global_transforms));

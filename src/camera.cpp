@@ -3,7 +3,16 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <array>
+
 namespace iris {
+    static auto plane_from_points(const glm::vec3& a, const glm::vec3& b, const glm::vec3& c) noexcept -> plane_t {
+        auto plane = plane_t();
+        plane.normal = glm::normalize(glm::cross(c - a, b - a));
+        plane.distance = glm::dot(plane.normal, a);
+        return plane;
+    }
+
     void window_t::update() noexcept {
         if (is_mouse_captured) {
             auto c_x = 0.0;
@@ -137,25 +146,32 @@ namespace iris {
         _up = glm::normalize(glm::cross(_right, _front));
     }
 
-    auto make_perspective_frustum(const glm::mat4& view, float32 fov, float32 aspect, float32 near, float32 far) noexcept -> frustum_t {
+    auto make_perspective_frustum(const glm::mat4& pv) noexcept -> frustum_t {
         auto frustum = frustum_t();
-        const auto inv_view = glm::inverse(view);
-        const auto half_vertical = far * glm::tan(fov / 2.0f);
-        const auto half_horizontal = aspect * half_vertical;
-        const auto right = glm::vec3(inv_view[0]);
-        const auto up = glm::vec3(inv_view[1]);
-        const auto front = glm::vec3(-inv_view[2]);
-        const auto position = glm::vec3(inv_view[3]);
+        const auto inv_pv = glm::inverse(pv);
+        auto corners = std::to_array({
+            glm::vec3( 1.0f, -1.0f, -1.0f),
+            glm::vec3(-1.0f, -1.0f, -1.0f),
+            glm::vec3( 1.0f,  1.0f, -1.0f),
+            glm::vec3(-1.0f,  1.0f, -1.0f),
+            glm::vec3( 1.0f, -1.0f,  1.0f),
+            glm::vec3(-1.0f, -1.0f,  1.0f),
+            glm::vec3( 1.0f,  1.0f,  1.0f),
+            glm::vec3(-1.0f,  1.0f,  1.0f),
+        });
 
-        const auto front_far = front * far;
-        const auto front_near = front * near;
+        for (auto& each : corners) {
+            const auto corner = inv_pv * glm::vec4(each, 1.0f);
+            each = corner / corner.w;
+        }
 
-        frustum.near = plane_t(front, front_near + position);
-        frustum.far = plane_t(-front, front_far + position);
-        frustum.right = plane_t(glm::cross(front_far - right * half_horizontal, up), position);
-        frustum.left = plane_t(glm::cross(up, front_far + right * half_horizontal), position);
-        frustum.top = plane_t(glm::cross(right, front_far - up * half_vertical), position);
-        frustum.bottom = plane_t(glm::cross(front_far + up * half_vertical, right), position);
+        auto planes = std::array<plane_t, 6>();
+        frustum.planes[0] = plane_from_points(corners[0], corners[4], corners[2]);
+        frustum.planes[1] = plane_from_points(corners[1], corners[3], corners[5]);
+        frustum.planes[2] = plane_from_points(corners[1], corners[5], corners[0]);
+        frustum.planes[3] = plane_from_points(corners[3], corners[2], corners[7]);
+        frustum.planes[4] = plane_from_points(corners[5], corners[7], corners[4]);
+        frustum.planes[5] = plane_from_points(corners[1], corners[0], corners[3]);
 
         return frustum;
     }

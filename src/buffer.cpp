@@ -29,7 +29,7 @@ namespace iris {
         glNamedBufferStorage(buffer._id, size, nullptr, GL_DYNAMIC_STORAGE_BIT);
 
         if (mapped) {
-            buffer._mapped = glMapNamedBuffer(buffer._id, GL_WRITE_ONLY);
+            buffer._mapped = glMapNamedBuffer(buffer._id, GL_READ_WRITE);
         }
 
         buffer._type = type;

@@ -153,6 +153,7 @@ namespace iris {
                             default: break;
                         }
                     }
+                    auto sphere = glm::vec4();
                     auto aabb = aabb_t();
                     aabb.min = glm::vec3(std::numeric_limits<float>::max());
                     aabb.max = glm::vec3(std::numeric_limits<float>::lowest());
@@ -172,9 +173,12 @@ namespace iris {
                         aabb.min = glm::min(aabb.min, vertices[l].position);
                         aabb.max = glm::max(aabb.max, vertices[l].position);
                     }
+                    for (auto& vertex : vertices) {
+                        sphere.w = glm::max(sphere.w, glm::length(vertex.position - aabb.center));
+                    }
                     aabb.center = (aabb.min + aabb.max) / 2.0f;
                     aabb.extent = aabb.max - aabb.center;
-
+                    sphere = glm::vec4(aabb.center, sphere.w);
                     auto indices = std::vector<uint32>();
                     {
                         const auto& accessor = *primitive.indices;
@@ -240,6 +244,7 @@ namespace iris {
                     auto& object = model._objects.emplace_back();
                     object.mesh = std::move(m_mesh);
                     object.aabb = aabb;
+                    object.sphere = sphere;
                     object.diffuse_texture = diffuse_texture_index;
                     object.normal_texture = normal_texture_index;
                     object.specular_texture = specular_texture_index;

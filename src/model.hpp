@@ -24,6 +24,7 @@ namespace iris {
     struct object_t {
         mesh_t mesh = {};
         aabb_t aabb = {};
+        glm::vec4 sphere = {};
 
         uint32 diffuse_texture = 0;
         uint32 normal_texture = 0;

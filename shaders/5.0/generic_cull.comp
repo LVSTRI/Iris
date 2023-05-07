@@ -25,6 +25,7 @@ struct object_info_t {
     uint group_index;
     uint group_offset;
 
+    vec4 sphere; // w is radius
     aabb_t aabb;
     indirect_command_t command;
 };
@@ -38,6 +39,7 @@ layout (local_size_x = INVOCATION_SIZE, local_size_y = 1, local_size_z = 1) in;
 layout (location = 0) uniform uint u_draw_count;
 layout (location = 1) uniform uint u_object_count;
 layout (location = 2) uniform uint u_disable_frustum_culling;
+layout (location = 3) uniform uint u_disable_near_culling;
 
 layout (std430, binding = 0) readonly restrict buffer b_frustum {
     // xyz => normal
@@ -77,32 +79,32 @@ bool is_aabb_inside_plane(in aabb_t aabb, in vec4 plane) {
     return -radius <= (dot(normal, center) - plane.w);
 }
 
-bool is_object_visible(in object_info_t object, in mat4 model) {
-    const aabb_t aabb = object.aabb;
+bool is_object_visible(in aabb_t aabb, in mat4 model) {
+    const vec3 world_aabb_min = vec3(model * vec4(aabb.min.xyz, 1.0));
+    const vec3 world_aabb_max = vec3(model * vec4(aabb.max.xyz, 1.0));
     const vec3 world_aabb_center = vec3(model * vec4(aabb.center.xyz, 1.0));
     const vec3 right = vec3(model[0]) * aabb.extent.x;
     const vec3 up = vec3(model[1]) * aabb.extent.y;
     const vec3 forward = vec3(-model[2]) * aabb.extent.z;
 
-    const vec3 half_extent = vec3(
+    const vec3 world_extent = vec3(
         abs(dot(vec3(1, 0, 0), right)) +
         abs(dot(vec3(1, 0, 0), up)) +
         abs(dot(vec3(1, 0, 0), forward)),
-
         abs(dot(vec3(0, 1, 0), right)) +
         abs(dot(vec3(0, 1, 0), up)) +
         abs(dot(vec3(0, 1, 0), forward)),
-
         abs(dot(vec3(0, 0, 1), right)) +
         abs(dot(vec3(0, 0, 1), up)) +
         abs(dot(vec3(0, 0, 1), forward)));
 
     const aabb_t world_aabb = aabb_t(
-        vec4(1.0),
-        vec4(1.0),
+        vec4(world_aabb_min, 1.0),
+        vec4(world_aabb_max, 1.0),
         vec4(world_aabb_center, 1.0),
-        vec4(half_extent, 1.0));
-    for (uint i = 0; i < 6; ++i) {
+        vec4(world_extent, 1.0));
+    const uint planes = bool(u_disable_near_culling) ? 5 : 6;
+    for (uint i = 0; i < planes; ++i) {
         if (!is_aabb_inside_plane(world_aabb, frustum.planes[i])) {
             return false;
         }
@@ -118,7 +120,7 @@ void main() {
         const mat4 local_transform = local_transforms[object.local_transform];
         const mat4 global_transform = global_transforms[object.global_transform];
         const mat4 model = global_transform * local_transform;
-        if (bool(u_disable_frustum_culling) || is_object_visible(object, model)) {
+        if (bool(u_disable_frustum_culling) || is_object_visible(object.aabb, model)) {
             const uint slot = atomicAdd(draw_count[object.group_index], 1);
             // slot translates to gl_DrawID
             indirect_commands[slot + object.group_offset] = object.command;

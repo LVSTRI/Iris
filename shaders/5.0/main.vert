@@ -26,6 +26,7 @@ struct object_info_t {
     uint group_index;
     uint group_offset;
 
+    vec4 sphere; // w is radius
     aabb_t aabb;
     indirect_command_t command;
 };

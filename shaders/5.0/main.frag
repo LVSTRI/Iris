@@ -113,13 +113,14 @@ vec3 sample_shadow(in vec3 shadow_frag_pos,
     const vec2 texel_size = 1.0 / shadow_size;
 
     //const vec2 bias_uv = calcualte_depth_plane_bias(ddx_shadow_frag_pos, ddy_shadow_frag_pos);
-    const float width = 0.0085;
+    //const float plane_bias = min(dot(vec2(1.0) * texel_size, abs(bias_uv)), 0.05);
+    const float width = 0.00875;
     const vec3 halfway = normalize(light_dir + normal);
     float bias = max(
         clamp((width / 2.0) * tan(acos(abs(clamp(dot(normal, halfway), -1.0, 1.0)))), 0.0, width),
         clamp((width / 2.0) * tan(acos(abs(clamp(dot(halfway, light_dir), -1.0, 1.0)))), 0.0, width));
     //float bias = clamp((width / 2.0) * tan(acos(abs(clamp(dot(normal, light_dir), -1.0, 1.0)))), 0.0, width);
-    bias /= float(cascade + 1);
+    bias /= float[](1.0, 1.25, 1.33, 1.5)[cascade];
     const float light_depth = shadow_frag_pos.z - bias;
     const float kernel_radius = float[](4.0, 3.0, 2.0, 1.0)[cascade];
     const uint sample_count = 64;

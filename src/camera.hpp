@@ -40,12 +40,7 @@ namespace iris {
     };
 
     struct frustum_t {
-        plane_t near = {};
-        plane_t far = {};
-        plane_t right = {};
-        plane_t left = {};
-        plane_t top = {};
-        plane_t bottom = {};
+        plane_t planes[6];
     };
 
     class camera_t {
@@ -94,6 +89,5 @@ namespace iris {
         std::reference_wrapper<const window_t> _window;
     };
 
-    auto make_perspective_frustum(const glm::mat4& view, float32 fov, float32 aspect, float32 near, float32 far) noexcept -> frustum_t;
-
+    auto make_perspective_frustum(const glm::mat4& pv) noexcept -> frustum_t;
 } // namespace iris
