@@ -87,6 +87,50 @@ namespace iris {
         return shader;
     }
 
+    auto shader_t::create_mesh(const fs::path& task, const fs::path& mesh, const fs::path& fragment) noexcept -> self {
+        auto shader = self();
+        shader._id = glCreateProgram();
+        auto task_shader = 0_u32;
+        if (!task.empty()) {
+            task_shader = glCreateShader(GL_TASK_SHADER_NV);
+            const auto task_shader_file = iris::whole_file(task);
+            const auto* task_shader_source = task_shader_file.c_str();
+            glShaderSource(task_shader, 1, &task_shader_source, nullptr);
+            glCompileShader(task_shader);
+            shader_compile_status(task_shader);
+        }
+
+        auto mesh_shader = glCreateShader(GL_MESH_SHADER_NV);
+        const auto mesh_shader_file = iris::whole_file(mesh);
+        const auto* mesh_shader_source = mesh_shader_file.c_str();
+        glShaderSource(mesh_shader, 1, &mesh_shader_source, nullptr);
+        glCompileShader(mesh_shader);
+        shader_compile_status(mesh_shader);
+
+        auto fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
+        const auto fragment_shader_file = iris::whole_file(fragment);
+        const auto* fragment_shader_source = fragment_shader_file.c_str();
+        glShaderSource(fragment_shader, 1, &fragment_shader_source, nullptr);
+        glCompileShader(fragment_shader);
+        shader_compile_status(fragment_shader);
+
+        if (!task.empty()) {
+            glAttachShader(shader._id, task_shader);
+        }
+        glAttachShader(shader._id, mesh_shader);
+        glAttachShader(shader._id, fragment_shader);
+        glLinkProgram(shader._id);
+        program_link_status(shader._id);
+
+        if (!task.empty()) {
+            glDeleteShader(task_shader);
+        }
+        glDeleteShader(mesh_shader);
+        glDeleteShader(fragment_shader);
+
+        return shader;
+    }
+
     auto shader_t::bind() const noexcept -> const self& {
         glUseProgram(_id);
         return *this;

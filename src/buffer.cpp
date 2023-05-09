@@ -11,7 +11,9 @@ namespace iris {
         if (_mapped) {
             glUnmapNamedBuffer(_id);
         }
-        glDeleteBuffers(1, &_id);
+        if (_id) {
+            glDeleteBuffers(1, &_id);
+        }
     }
 
     buffer_t::buffer_t(self&& other) noexcept {
@@ -23,10 +25,10 @@ namespace iris {
         return *this;
     }
 
-    auto buffer_t::create(uint32 size, uint32 type, bool mapped) noexcept -> self {
+    auto buffer_t::create(uint32 size, uint32 type, uint32 storage, bool mapped) noexcept -> self {
         auto buffer = self();
         glCreateBuffers(1, &buffer._id);
-        glNamedBufferStorage(buffer._id, size, nullptr, GL_DYNAMIC_STORAGE_BIT);
+        glNamedBufferStorage(buffer._id, size, nullptr, storage);
 
         if (mapped) {
             buffer._mapped = glMapNamedBuffer(buffer._id, GL_READ_WRITE);
@@ -80,7 +82,9 @@ namespace iris {
     }
 
     auto buffer_t::bind_range(uint32 type, uint32 index, uint64 offset, uint64 size) const noexcept -> const self& {
-        glBindBufferRange(type, index, _id, offset, size);
+        if (size != 0) {
+            glBindBufferRange(type, index, _id, offset, size);
+        }
         return *this;
     }
 

@@ -24,6 +24,7 @@ namespace iris {
 
         static auto create(const fs::path& vertex, const fs::path& fragment) noexcept -> self;
         static auto create_compute(const fs::path& compute) noexcept -> self;
+        static auto create_mesh(const fs::path& task, const fs::path& mesh, const fs::path& fragment) noexcept -> self;
 
         auto bind() const noexcept -> const self&;
 

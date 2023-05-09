@@ -1,0 +1,73 @@
+#version 460 core
+#extension GL_NV_mesh_shader : require
+
+struct meshlet_t {
+    uint vertex_offset;
+    uint index_offset;
+    uint index_count;
+    uint triangle_offset;
+    uint triangle_count;
+    uint mesh_index;
+};
+
+struct vertex_format_t {
+    vec4 position;
+    vec4 normal;
+    vec4 uv;
+    vec4 tangent;
+};
+
+layout (local_size_x = 32) in;
+
+layout (triangles, max_vertices = 32, max_primitives = 124) out;
+
+layout (location = 0) out t_per_vertex {
+    flat uint meshlet_id;
+    flat uint mesh_id;
+    vec2 uv;
+} o_per_vertex[];
+
+layout (location = 0) uniform mat4 pv;
+
+layout (std430, binding = 0) readonly restrict buffer b_transform_buffer {
+    mat4[] transforms;
+};
+
+layout (std430, binding = 1) readonly restrict buffer b_meshlet_buffer {
+    meshlet_t[] meshlets;
+};
+
+layout (std430, binding = 2) readonly restrict buffer b_vertex_buffer {
+    vertex_format_t[] vertices;
+};
+
+layout (std430, binding = 3) readonly restrict buffer b_index_buffer {
+    uint[] indices;
+};
+
+layout (std430, binding = 4) readonly restrict buffer b_triangle_buffer {
+    uint[] triangles;
+};
+
+void main() {
+    const uint workgroup_index = gl_WorkGroupID.x;
+    const uint thread_index = gl_LocalInvocationID.x;
+    const meshlet_t meshlet = meshlets[workgroup_index];
+
+    if (thread_index < meshlet.index_count) {
+        const mat4 transform = transforms[meshlet.mesh_index];
+        const vertex_format_t vertex = vertices[meshlet.vertex_offset + indices[meshlet.index_offset + thread_index]];
+        gl_MeshVerticesNV[thread_index].gl_Position = pv * transform * vec4(vertex.position.xyz, 1.0);
+        o_per_vertex[thread_index].meshlet_id = workgroup_index;
+        o_per_vertex[thread_index].mesh_id = meshlet.mesh_index;
+        o_per_vertex[thread_index].uv = vertex.uv.xy;
+    }
+
+    if (thread_index == 0) {
+        const uint triangle_count = meshlet.triangle_count;
+        gl_PrimitiveCountNV = triangle_count;
+        for (uint i = 0; i < triangle_count * 3; ++i) {
+            gl_PrimitiveIndicesNV[i] = triangles[meshlet.triangle_offset + i];
+        }
+    }
+}

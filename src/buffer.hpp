@@ -2,6 +2,8 @@
 
 #include <utilities.hpp>
 
+#include <glad/gl.h>
+
 namespace iris {
     class buffer_t {
     public:
@@ -15,7 +17,7 @@ namespace iris {
         buffer_t(self&& other) noexcept;
         auto operator =(self&& other) noexcept -> self&;
 
-        static auto create(uint32 size, uint32 type, bool mapped = false) noexcept -> self;
+        static auto create(uint32 size, uint32 type, uint32 storage = GL_DYNAMIC_STORAGE_BIT, bool mapped = false) noexcept -> self;
 
         auto id() const noexcept -> uint32;
         auto size() const noexcept -> uint64;

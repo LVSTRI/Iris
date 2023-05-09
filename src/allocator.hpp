@@ -7,6 +7,7 @@
 
 namespace iris {
     class allocator_t;
+    struct buffer_t;
     class buffer_slice_t {
     public:
         using self = buffer_slice_t;
@@ -19,11 +20,12 @@ namespace iris {
         buffer_slice_t(buffer_slice_t&& other) noexcept;
         auto operator =(buffer_slice_t&& other) noexcept -> buffer_slice_t&;
 
-        static auto create(uint64 offset, uint64 size, uint64 index, allocator_t* allocator) noexcept -> self;
+        static auto create(uint64 offset, uint64 size, uint64 index, allocator_t* allocator, buffer_t* handle = nullptr) noexcept -> self;
 
         auto offset() const noexcept -> uint64;
         auto size() const noexcept -> uint64;
         auto index() const noexcept -> uint64;
+        auto handle() const noexcept -> buffer_t&;
         auto allocator() const noexcept -> allocator_t&;
 
         auto swap(self& other) noexcept -> void;
@@ -33,6 +35,7 @@ namespace iris {
         uint64 _size = 0;
         uint64 _index = 0;
 
+        buffer_t* _handle = nullptr;
         allocator_t* _allocator = nullptr;
     };
 
@@ -65,7 +68,7 @@ namespace iris {
         auto capacity() const noexcept -> uint64;
 
         auto allocate(uint64 size) noexcept -> buffer_slice_t;
-        auto free(const buffer_slice_t& block) noexcept -> void;
+        auto free(const buffer_slice_t& block) noexcept -> bool;
 
         auto is_block_empty(uint64 block) const noexcept -> bool;
 
@@ -76,5 +79,31 @@ namespace iris {
 
         std::vector<structure_type> _blocks;
         uint64 _capacity = 0;
+    };
+
+    class buffer_allocator_t {
+    public:
+        using self = buffer_allocator_t;
+
+        buffer_allocator_t() noexcept;
+        ~buffer_allocator_t() noexcept;
+
+        buffer_allocator_t(const self&) noexcept = delete;
+        auto operator =(const self&) noexcept -> self& = delete;
+        buffer_allocator_t(self&& other) noexcept;
+        auto operator =(self&& other) noexcept -> self&;
+
+        static auto create(uint64 capacity) noexcept -> self;
+
+        auto capacity() const noexcept -> uint64;
+
+        auto allocate(uint64 size) noexcept -> buffer_slice_t;
+        auto free(const buffer_slice_t& block) noexcept -> bool;
+
+        auto swap(self& other) noexcept -> void;
+
+    private:
+        std::vector<buffer_t> _blocks;
+        allocator_t _allocator;
     };
 } // namespace iris

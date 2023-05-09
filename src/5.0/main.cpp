@@ -47,6 +47,13 @@ struct draw_elements_indirect_t {
     iris::uint32 base_instance = {};
 };
 
+struct draw_arrays_indirect_t {
+    iris::uint32 count = {};
+    iris::uint32 instance_count = {};
+    iris::uint32 first = {};
+    iris::uint32 base_instance = {};
+};
+
 struct camera_data_t {
     glm::mat4 projection;
     glm::mat4 view;
@@ -107,6 +114,12 @@ struct cascade_data_t {
     glm::mat4 global;
     glm::vec4 scale;
     glm::vec4 offset; // w is split
+};
+
+struct cull_input_package_t {
+    std::reference_wrapper<iris::buffer_t> indirect;
+    std::reference_wrapper<iris::buffer_t> count;
+    std::reference_wrapper<iris::buffer_t> shift;
 };
 
 static auto hash_combine(iris::uint64 seed, iris::uint64 value) noexcept -> iris::uint64 {
@@ -340,20 +353,63 @@ int main() {
     auto empty_vao = 0_u32;
     glCreateVertexArrays(1, &empty_vao);
 
+    auto aabb_vao = 0_u32;
+    auto aabb_vbo = 0_u32;
+
+    glCreateVertexArrays(1, &aabb_vao);
+    glCreateBuffers(1, &aabb_vbo);
+    {
+        const auto centered_cube = std::to_array({
+            glm::vec3(-1.0f, -1.0f, -1.0f),
+            glm::vec3( 1.0f, -1.0f, -1.0f),
+            glm::vec3( 1.0f,  1.0f, -1.0f),
+            glm::vec3(-1.0f,  1.0f, -1.0f),
+            glm::vec3(-1.0f, -1.0f,  1.0f),
+            glm::vec3( 1.0f, -1.0f,  1.0f),
+            glm::vec3( 1.0f,  1.0f,  1.0f),
+            glm::vec3(-1.0f,  1.0f,  1.0f),
+        });
+        const auto aabb_vertices = std::to_array({
+            centered_cube[0], centered_cube[1],
+            centered_cube[1], centered_cube[2],
+            centered_cube[2], centered_cube[3],
+            centered_cube[3], centered_cube[0],
+
+            centered_cube[4], centered_cube[5],
+            centered_cube[5], centered_cube[6],
+            centered_cube[6], centered_cube[7],
+            centered_cube[7], centered_cube[4],
+
+            centered_cube[0], centered_cube[4],
+            centered_cube[1], centered_cube[5],
+            centered_cube[2], centered_cube[6],
+            centered_cube[3], centered_cube[7],
+        });
+        glNamedBufferStorage(aabb_vbo, sizeof(aabb_vertices), aabb_vertices.data(), 0);
+        glEnableVertexArrayAttrib(aabb_vao, 0);
+        glVertexArrayAttribFormat(aabb_vao, 0, 3, GL_FLOAT, GL_FALSE, 0);
+        glVertexArrayAttribBinding(aabb_vao, 0, 0);
+        glVertexArrayVertexBuffer(aabb_vao, 0, aabb_vbo, 0, sizeof(glm::vec3));
+    }
+
     auto camera_buffer = iris::buffer_t::create(sizeof(camera_data_t), GL_UNIFORM_BUFFER);
     auto frustum_buffer = iris::buffer_t::create(sizeof(iris::frustum_t[32]), GL_SHADER_STORAGE_BUFFER);
     auto local_transform_buffer = iris::buffer_t::create(sizeof(glm::mat4[16384]), GL_SHADER_STORAGE_BUFFER);
     auto global_transform_buffer = iris::buffer_t::create(sizeof(glm::mat4[16384]), GL_SHADER_STORAGE_BUFFER);
     auto object_info_buffer = iris::buffer_t::create(sizeof(object_info_t[16384]), GL_SHADER_STORAGE_BUFFER);
-    auto texture_buffer = iris::buffer_t::create(sizeof(iris::uint64[16384]), GL_SHADER_STORAGE_BUFFER);
+    auto texture_buffer = iris::buffer_t::create(sizeof(iris::uint64[4096]), GL_SHADER_STORAGE_BUFFER);
     auto cascade_setup_buffer = iris::buffer_t::create(sizeof(cascade_setup_data_t), GL_UNIFORM_BUFFER);
-    auto cascade_buffer = iris::buffer_t::create(sizeof(cascade_data_t[CASCADE_COUNT]), GL_SHADER_STORAGE_BUFFER);
     auto directional_lights_buffer = iris::buffer_t::create(sizeof(directional_light_t[16]), GL_UNIFORM_BUFFER);
+    auto cascade_buffer = iris::buffer_t::create(sizeof(cascade_data_t[CASCADE_COUNT]), GL_SHADER_STORAGE_BUFFER, GL_NONE);
 
     // cull output
-    auto indirect_command_buffer = iris::buffer_t::create(sizeof(draw_elements_indirect_t[16384]), GL_DRAW_INDIRECT_BUFFER);
-    auto draw_count_buffer = iris::buffer_t::create(sizeof(iris::uint64[16384]), GL_PARAMETER_BUFFER);
-    auto object_index_shift_buffer = iris::buffer_t::create(sizeof(iris::uint64[16384]), GL_SHADER_STORAGE_BUFFER);
+    auto main_indirect_buffer = iris::buffer_t::create(sizeof(draw_elements_indirect_t[16384]), GL_DRAW_INDIRECT_BUFFER);
+    auto main_count_buffer = iris::buffer_t::create(sizeof(iris::uint64[1024]), GL_PARAMETER_BUFFER, GL_NONE);
+    auto main_object_shift_buffer = iris::buffer_t::create(sizeof(iris::uint64[16384]), GL_SHADER_STORAGE_BUFFER, GL_NONE);
+
+    auto shadow_indirect_buffer = iris::buffer_t::create(sizeof(draw_elements_indirect_t[16384]), GL_DRAW_INDIRECT_BUFFER, GL_NONE);
+    auto shadow_count_buffer = iris::buffer_t::create(sizeof(iris::uint64[1024]), GL_PARAMETER_BUFFER, GL_NONE);
+    auto shadow_object_shift_buffer = iris::buffer_t::create(sizeof(iris::uint64[16384]), GL_SHADER_STORAGE_BUFFER, GL_NONE);
 
     auto offscreen_attachment = std::vector<iris::framebuffer_attachment_t>(2);
     offscreen_attachment[0] = iris::framebuffer_attachment_t::create(
@@ -410,6 +466,7 @@ int main() {
 
     auto delta_time = 0.0f;
     auto last_time = 0.0f;
+    glfwSwapInterval(0);
     while (!glfwWindowShouldClose(window.handle)) {
         if (window.is_resized) {
             offscreen_attachment[0] = iris::framebuffer_attachment_t::create(
@@ -461,7 +518,7 @@ int main() {
 
         auto object_infos = std::vector<object_info_t>();
         object_infos.reserve(objects.size());
-        auto indirect_groups = group_indirect_commands(models);
+        const auto indirect_groups = group_indirect_commands(models);
         {
             auto mesh_index = 0_u32;
             auto group_index = 0_u32;
@@ -507,8 +564,7 @@ int main() {
             });
         }
 
-        auto global_pv = calculate_global_projection(camera, directional_lights[0].direction);
-
+        const auto camera_frustum = iris::make_perspective_frustum(camera.projection() * camera.view());
         camera_buffer.write(iris::as_const_ptr(camera_data_t {
             camera.projection(),
             camera.view(),
@@ -518,6 +574,7 @@ int main() {
             camera.far()
         }), sizeof(camera_data_t));
 
+        auto global_pv = calculate_global_projection(camera, directional_lights[0].direction);
         cascade_setup_buffer.write(iris::as_const_ptr(cascade_setup_data_t {
             .global_pv = global_pv,
             .inv_pv = glm::inverse(camera.projection() * camera.view()),
@@ -525,46 +582,64 @@ int main() {
             .resolution = static_cast<iris::float32>(shadow_attachment.width()),
         }), sizeof(cascade_setup_data_t));
 
-        const auto camera_frustum = iris::make_perspective_frustum(camera.projection() * camera.view());
-        frustum_buffer.write(iris::as_const_ptr(camera_frustum), iris::size_bytes(camera_frustum));
         local_transform_buffer.write(local_transforms.data(), iris::size_bytes(local_transforms));
         global_transform_buffer.write(global_transforms.data(), iris::size_bytes(global_transforms));
         object_info_buffer.write(object_infos.data(), iris::size_bytes(object_infos));
         texture_buffer.write(texture_handles.data(), iris::size_bytes(texture_handles));
         directional_lights_buffer.write(directional_lights.data(), iris::size_bytes(directional_lights));
 
-        cull_shader
-            .bind()
-            .set(0, { static_cast<iris::uint32>(indirect_groups.size()) })
-            .set(1, { static_cast<iris::uint32>(object_infos.size()) })
-            .set(2, { 0_u32 })
-            .set(3, { 0_u32 });
-        frustum_buffer.bind_range(0, 0, iris::size_bytes(camera_frustum));
-        local_transform_buffer.bind_range(1, 0, iris::size_bytes(local_transforms));
-        global_transform_buffer.bind_range(2, 0, iris::size_bytes(global_transforms));
-        object_info_buffer.bind_range(3, 0, iris::size_bytes(object_infos));
-        indirect_command_buffer.bind_base(GL_SHADER_STORAGE_BUFFER, 4);
-        draw_count_buffer.bind_base(GL_SHADER_STORAGE_BUFFER, 5);
-        object_index_shift_buffer.bind_base(6);
+        auto frustum_cull_scene = [&](cull_input_package_t package, iris::uint32 disable_near) {
+            glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, -1, "frustum_cull_pass");
+            cull_shader
+                .bind()
+                .set(0, { static_cast<iris::uint32>(indirect_groups.size()) })
+                .set(1, { static_cast<iris::uint32>(object_infos.size()) })
+                .set(2, { 0_u32 })
+                .set(3, { disable_near });
+            local_transform_buffer.bind_range(1, 0, iris::size_bytes(local_transforms));
+            global_transform_buffer.bind_range(2, 0, iris::size_bytes(global_transforms));
+            object_info_buffer.bind_range(3, 0, iris::size_bytes(object_infos));
+            package.indirect.get().bind_base(GL_SHADER_STORAGE_BUFFER, 4);
+            package.count.get().bind_base(GL_SHADER_STORAGE_BUFFER, 5);
+            package.shift.get().bind_base(6);
 
-        glClearNamedBufferSubData(
-            draw_count_buffer.id(),
-            GL_R32UI,
-            0,
-            draw_count_buffer.size(),
-            GL_RED_INTEGER,
-            GL_UNSIGNED_INT,
-            nullptr);
-        glMemoryBarrier(GL_BUFFER_UPDATE_BARRIER_BIT);
-        glDispatchCompute((object_infos.size() + 255) / 256, 1, 1);
-        glMemoryBarrier(GL_SHADER_STORAGE_BUFFER | GL_COMMAND_BARRIER_BIT);
+            glClearNamedBufferSubData(
+                package.count.get().id(),
+                GL_R32UI,
+                0,
+                package.count.get().size(),
+                GL_RED_INTEGER,
+                GL_UNSIGNED_INT,
+                nullptr);
+            glMemoryBarrier(GL_BUFFER_UPDATE_BARRIER_BIT);
+            glDispatchCompute((object_infos.size() + 255) / 256, 1, 1);
+            glMemoryBarrier(GL_SHADER_STORAGE_BUFFER | GL_COMMAND_BARRIER_BIT);
+            glPopDebugGroup();
+        };
 
+        auto main_indirect_package = cull_input_package_t {
+            .indirect = std::ref(main_indirect_buffer),
+            .count = std::ref(main_count_buffer),
+            .shift = std::ref(main_object_shift_buffer)
+        };
+        auto shadow_indirect_package = cull_input_package_t {
+            .indirect = std::ref(shadow_indirect_buffer),
+            .count = std::ref(shadow_count_buffer),
+            .shift = std::ref(shadow_object_shift_buffer)
+        };
+
+        glViewport(0, 0, window.width, window.height);
+
+        glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, -1, "depth_prepass");
         glEnable(GL_DEPTH_TEST);
         glEnable(GL_CULL_FACE);
         glDepthMask(GL_TRUE);
         glDepthFunc(GL_LEQUAL);
 
-        glViewport(0, 0, window.width, window.height);
+        frustum_buffer.write(iris::as_const_ptr(camera_frustum), iris::size_bytes(camera_frustum));
+        frustum_buffer.bind_range(0, 0, iris::size_bytes(camera_frustum));
+        frustum_cull_scene(main_indirect_package, 0);
+
         depth_only_fbo.clear_depth(1.0f);
         depth_only_fbo.bind();
         depth_only_shader.bind();
@@ -572,9 +647,9 @@ int main() {
         local_transform_buffer.bind_range(1, 0, iris::size_bytes(local_transforms));
         global_transform_buffer.bind_range(2, 0, iris::size_bytes(global_transforms));
         object_info_buffer.bind_range(3, 0, iris::size_bytes(object_infos));
-        object_index_shift_buffer.bind_base(4);
-        indirect_command_buffer.bind();
-        draw_count_buffer.bind();
+        main_object_shift_buffer.bind_base(4);
+        main_indirect_buffer.bind();
+        main_count_buffer.bind();
         {
             auto indirect_offset = 0_u32;
             auto group_offset = 0_u32;
@@ -596,7 +671,9 @@ int main() {
                 group_count_offset += sizeof(iris::uint32);
             }
         }
+        glPopDebugGroup();
 
+        glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, -1, "depth_reduce");
         depth_reduce_init_shader.bind();
         offscreen_attachment[1].bind_texture(0);
         depth_reduce_attachments[0].bind_image_texture(0, 0, false, 0, GL_WRITE_ONLY);
@@ -611,7 +688,9 @@ int main() {
             glDispatchCompute(depth_reduce_wgc[i].x, depth_reduce_wgc[i].y, 1);
             glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
         }
+        glPopDebugGroup();
 
+        glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, -1, "shadow_setup");
         setup_cascades_shader.bind();
         depth_reduce_attachments.back().bind_image_texture(0, 0, false, 0, GL_READ_ONLY);
         cascade_setup_buffer.bind_base(1);
@@ -620,38 +699,18 @@ int main() {
         frustum_buffer.bind_range(4, sizeof(iris::frustum_t), sizeof(iris::frustum_t[CASCADE_COUNT]));
         glDispatchCompute(1, 1, 1);
         glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+        glPopDebugGroup();
 
+        glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, -1, "shadow_render");
         //glCullFace(GL_FRONT);
         for (auto layer = 0_u32; layer < CASCADE_COUNT; layer++) {
             // cull first
-            cull_shader
-                .bind()
-                .set(0, { static_cast<iris::uint32>(indirect_groups.size()) })
-                .set(1, { static_cast<iris::uint32>(object_infos.size()) })
-                .set(2, { 0_u32 })
-                .set(3, { 1_u32 });
+            shadow_fbo.bind();
+            shadow_fbo.set_layer(0, layer);
             frustum_buffer.bind_range(0, (layer + 1) * sizeof(iris::frustum_t), sizeof(iris::frustum_t));
-            local_transform_buffer.bind_range(1, 0, iris::size_bytes(local_transforms));
-            global_transform_buffer.bind_range(2, 0, iris::size_bytes(global_transforms));
-            object_info_buffer.bind_range(3, 0, iris::size_bytes(object_infos));
-            indirect_command_buffer.bind_base(GL_SHADER_STORAGE_BUFFER, 4);
-            draw_count_buffer.bind_base(GL_SHADER_STORAGE_BUFFER, 5);
-            object_index_shift_buffer.bind_base(6);
-
-            glClearNamedBufferSubData(
-                draw_count_buffer.id(),
-                GL_R32UI,
-                0,
-                draw_count_buffer.size(),
-                GL_RED_INTEGER,
-                GL_UNSIGNED_INT,
-                nullptr);
-            glMemoryBarrier(GL_BUFFER_UPDATE_BARRIER_BIT);
-            glDispatchCompute((object_infos.size() + 255) / 256, 1, 1);
-            glMemoryBarrier(GL_SHADER_STORAGE_BUFFER | GL_COMMAND_BARRIER_BIT);
+            frustum_cull_scene(shadow_indirect_package, 1);
 
             glViewport(0, 0, shadow_attachment.width(), shadow_attachment.height());
-            shadow_fbo.bind();
             shadow_shader
                 .bind()
                 .set(0, { layer });
@@ -659,11 +718,11 @@ int main() {
             local_transform_buffer.bind_range(1, 0, iris::size_bytes(local_transforms));
             global_transform_buffer.bind_range(2, 0, iris::size_bytes(global_transforms));
             object_info_buffer.bind_range(3, 0, iris::size_bytes(object_infos));
-            object_index_shift_buffer.bind_base(4);
+            shadow_object_shift_buffer.bind_base(4);
             texture_buffer.bind_range(5, 0, iris::size_bytes(texture_handles));
-            indirect_command_buffer.bind();
+            shadow_count_buffer.bind();
+            shadow_indirect_buffer.bind();
 
-            shadow_fbo.set_layer(0, layer);
             shadow_fbo.clear_depth(1.0f);
 
             auto indirect_offset = 0_u32;
@@ -687,52 +746,30 @@ int main() {
             }
         }
         //glCullFace(GL_BACK);
+        glPopDebugGroup();
 
+        glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, -1, "final_color_pass");
         glViewport(0, 0, window.width, window.height);
         glDepthMask(GL_FALSE);
         glDepthFunc(GL_EQUAL);
 
-        cull_shader
-            .bind()
-            .set(0, { static_cast<iris::uint32>(indirect_groups.size()) })
-            .set(1, { static_cast<iris::uint32>(object_infos.size()) })
-            .set(2, { 0_u32 })
-            .set(3, { 0_u32 });
-        frustum_buffer.bind_range(0, 0, iris::size_bytes(camera_frustum));
-        local_transform_buffer.bind_range(1, 0, iris::size_bytes(local_transforms));
-        global_transform_buffer.bind_range(2, 0, iris::size_bytes(global_transforms));
-        object_info_buffer.bind_range(3, 0, iris::size_bytes(object_infos));
-        indirect_command_buffer.bind_base(GL_SHADER_STORAGE_BUFFER, 4);
-        draw_count_buffer.bind_base(GL_SHADER_STORAGE_BUFFER, 5);
-        object_index_shift_buffer.bind_base(6);
-
-        glClearNamedBufferSubData(
-            draw_count_buffer.id(),
-            GL_R32UI,
-            0,
-            draw_count_buffer.size(),
-            GL_RED_INTEGER,
-            GL_UNSIGNED_INT,
-            nullptr);
-        glMemoryBarrier(GL_BUFFER_UPDATE_BARRIER_BIT);
-        glDispatchCompute((object_infos.size() + 255) / 256, 1, 1);
-        glMemoryBarrier(GL_SHADER_STORAGE_BUFFER | GL_COMMAND_BARRIER_BIT);
-
-        offscreen_fbo.clear_color(0, { 0_u32, 0_u32, 0_u32, 255_u32 });
         offscreen_fbo.bind();
+        offscreen_fbo.clear_color(0, { 0_u32, 0_u32, 0_u32, 255_u32 });
+        frustum_buffer.bind_range(0, 0, iris::size_bytes(camera_frustum));
+
         main_shader.bind();
         camera_buffer.bind_base(0);
         local_transform_buffer.bind_range(1, 0, iris::size_bytes(local_transforms));
         global_transform_buffer.bind_range(2, 0, iris::size_bytes(global_transforms));
         object_info_buffer.bind_range(3, 0, iris::size_bytes(object_infos));
-        object_index_shift_buffer.bind_base(4);
+        main_object_shift_buffer.bind_base(4);
         directional_lights_buffer.bind_range(5, 0, iris::size_bytes(directional_lights));
         texture_buffer.bind_range(6, 0, iris::size_bytes(texture_handles));
         cascade_buffer.bind_base(7);
         shadow_attachment.bind_texture(0);
         blue_noise_texture.bind(1);
-        indirect_command_buffer.bind();
-        draw_count_buffer.bind();
+        main_indirect_buffer.bind();
+        main_count_buffer.bind();
         {
             auto indirect_offset = 0_u32;
             auto group_offset = 0_u32;
@@ -757,7 +794,9 @@ int main() {
                 group_count_offset += sizeof(iris::uint32);
             }
         }
+        glPopDebugGroup();
 
+        glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, -1, "copy_to_backbuffer");
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_CULL_FACE);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -765,6 +804,7 @@ int main() {
         glBindTextureUnit(0, offscreen_attachment[0].id());
         glBindVertexArray(empty_vao);
         glDrawArrays(GL_TRIANGLES, 0, 3);
+        glPopDebugGroup();
 
         glfwSwapBuffers(window.handle);
         glfwPollEvents();

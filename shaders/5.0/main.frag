@@ -116,11 +116,18 @@ vec3 sample_shadow(in vec3 shadow_frag_pos,
     //const float plane_bias = min(dot(vec2(1.0) * texel_size, abs(bias_uv)), 0.05);
     const float width = 0.00875;
     const vec3 halfway = normalize(light_dir + normal);
-    float bias = max(
-        clamp((width / 2.0) * tan(acos(abs(clamp(dot(normal, halfway), -1.0, 1.0)))), 0.0, width),
-        clamp((width / 2.0) * tan(acos(abs(clamp(dot(halfway, light_dir), -1.0, 1.0)))), 0.0, width));
+    float bias = clamp((width / 2.0) * tan(acos(abs(clamp(max(dot(normal, halfway), dot(halfway, light_dir)), -1.0, 1.0)))), 0.0, width);
     //float bias = clamp((width / 2.0) * tan(acos(abs(clamp(dot(normal, light_dir), -1.0, 1.0)))), 0.0, width);
-    bias /= float[](1.0, 1.25, 1.33, 1.5)[cascade];
+    const float prev_split = cascade == 0 ? 0.0 : cascades[cascade - 1].offset.w;
+    const float next_split = cascades[cascade].offset.w;
+    const float bias_scale_lerp = clamp((depth_vs - prev_split) / (next_split - prev_split), 0.0, 1.0);
+    const vec2[] bias_scales = vec2[](
+        vec2(1.0, 2.0),
+        vec2(2.0, 2.5),
+        vec2(2.5, 3.0),
+        vec2(3.0, 4.0));
+
+    bias /= mix(bias_scales[cascade].x, bias_scales[cascade].y, bias_scale_lerp);
     const float light_depth = shadow_frag_pos.z - bias;
     const float kernel_radius = float[](4.0, 3.0, 2.0, 1.0)[cascade];
     const uint sample_count = 64;
@@ -138,10 +145,10 @@ vec3 sample_shadow(in vec3 shadow_frag_pos,
     }
     vec3 shadow = shadow_factor / float(sample_count);
     /*switch (cascade) {
-        case 0: shadow *= vec3(1.0, 0.25, 0.25); break;
-        case 1: shadow *= vec3(0.25, 1.0, 0.25); break;
-        case 2: shadow *= vec3(0.25, 0.25, 1.0); break;
-        case 3: shadow *= vec3(1.0, 1.0, 0.25); break;
+        case 0: shadow *= vec3(1.0, 0.5, 0.5); break;
+        case 1: shadow *= vec3(0.5, 1.0, 0.5); break;
+        case 2: shadow *= vec3(0.5, 0.5, 1.0); break;
+        case 3: shadow *= vec3(1.0, 1.0, 0.5); break;
     }*/
     return shadow;
 }

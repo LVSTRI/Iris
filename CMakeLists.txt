@@ -84,3 +84,6 @@ target_link_libraries(BasicRaytracing PUBLIC Iris)
 
 add_executable(IndirectDrawing src/5.0/main.cpp)
 target_link_libraries(IndirectDrawing PUBLIC Iris)
+
+add_executable(MeshShading src/5.1/main.cpp)
+target_link_libraries(MeshShading PUBLIC Iris)

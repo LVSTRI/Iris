@@ -1,4 +1,5 @@
 #include <allocator.hpp>
+#include <buffer.hpp>
 
 #include <type_traits>
 #include <utility>
@@ -21,11 +22,12 @@ namespace iris {
         return *this;
     }
 
-    auto buffer_slice_t::create(uint64 offset, uint64 size, uint64 index, allocator_t* allocator) noexcept -> self {
+    auto buffer_slice_t::create(uint64 offset, uint64 size, uint64 index, allocator_t* allocator, buffer_t* buffer) noexcept -> self {
         auto slice = self();
         slice._offset = offset;
         slice._size = size;
         slice._index = index;
+        slice._handle = buffer;
         slice._allocator = allocator;
         return slice;
     }
@@ -42,6 +44,10 @@ namespace iris {
         return _index;
     }
 
+    auto buffer_slice_t::handle() const noexcept -> buffer_t& {
+        return *_handle;
+    }
+
     auto buffer_slice_t::allocator() const noexcept -> allocator_t& {
         return *_allocator;
     }
@@ -51,6 +57,7 @@ namespace iris {
         swap(_offset, other._offset);
         swap(_size, other._size);
         swap(_index, other._index);
+        swap(_handle, other._handle);
         swap(_allocator, other._allocator);
     }
 
@@ -93,7 +100,7 @@ namespace iris {
         return buffer_slice_t::create(new_page.offset, new_page.size, new_page.id, this);
     }
 
-    auto allocator_t::free(const buffer_slice_t& slice) noexcept -> void {
+    auto allocator_t::free(const buffer_slice_t& slice) noexcept -> bool {
         auto& block = _blocks[slice.index()];
         auto page = page_t {
             .offset = slice.offset(),
@@ -129,8 +136,10 @@ namespace iris {
             };
             block.erase(curr);
             block.erase(next);
-            block.insert(new_block);
+            auto _0 = false;
+            std::tie(curr, _0) = block.insert(new_block);
         }
+        return curr->size == _capacity;
     }
 
     auto allocator_t::is_block_empty(uint64 block) const noexcept -> bool {
@@ -168,5 +177,60 @@ namespace iris {
             id = _blocks.size();
         }
         return std::make_pair(best, id - 1);
+    }
+
+    buffer_allocator_t::buffer_allocator_t() noexcept = default;
+
+    buffer_allocator_t::~buffer_allocator_t() noexcept = default;
+
+    buffer_allocator_t::buffer_allocator_t(self&& other) noexcept {
+        swap(other);
+    }
+
+    auto buffer_allocator_t::operator =(self&& other) noexcept -> self& {
+        self(std::move(other)).swap(*this);
+        return *this;
+    }
+
+    auto buffer_allocator_t::create(uint64 capacity) noexcept -> self {
+        auto buffer_allocator = self();
+        buffer_allocator._allocator = allocator_t::create(capacity);
+        return buffer_allocator;
+    }
+
+    auto buffer_allocator_t::capacity() const noexcept -> uint64 {
+        return _allocator.capacity();
+    }
+
+    auto buffer_allocator_t::allocate(uint64 size) noexcept -> buffer_slice_t {
+        auto allocation = _allocator.allocate(size);
+        if (allocation.index() >= _blocks.size()) {
+            _blocks.resize(allocation.index() + 1);
+        }
+        if (!_blocks[allocation.index()].id()) {
+            _blocks[allocation.index()] = buffer_t::create(capacity(), GL_ARRAY_BUFFER, GL_NONE);
+        }
+        return buffer_slice_t::create(
+            allocation.offset(),
+            allocation.size(),
+            allocation.index(),
+            &_allocator,
+            &_blocks[allocation.index()]);
+    }
+
+    auto buffer_allocator_t::free(const buffer_slice_t& block) noexcept -> bool {
+        if (_allocator.free(block)) {
+            if (block.index() > 0) {
+                _blocks[block.index()] = buffer_t();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    auto buffer_allocator_t::swap(self& other) noexcept -> void {
+        using std::swap;
+        swap(_allocator, other._allocator);
+        swap(_blocks, other._blocks);
     }
 } // namespace iris
