@@ -245,9 +245,9 @@ static auto calculate_hiz_construct_wg(iris::uint32 width, iris::uint32 height) 
     return wg_count;
 }
 
-static auto next_power_two(iris::uint32 v) noexcept -> iris::uint32 {
+static auto previous_power_two(iris::uint32 v) noexcept -> iris::uint32 {
     auto r = 1;
-    while (r < v) {
+    while ((r << 1) < v) {
         r <<= 1;
     }
     return r;
@@ -479,8 +479,8 @@ int main() {
     glTextureParameteri(shadow_attachment.id(), GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
 
     auto hiz_size = glm::uvec2(
-        next_power_two(window.width),
-        next_power_two(window.height));
+        previous_power_two(window.width),
+        previous_power_two(window.height));
     auto hiz_mips = 1 + std::floor(std::log2(std::max(hiz_size.x, hiz_size.y)));
     auto hiz_map = iris::framebuffer_attachment_t::create_mips(
         hiz_size.x,
@@ -495,8 +495,8 @@ int main() {
     auto hiz_construct_wgc = calculate_hiz_construct_wg(hiz_map.width(), hiz_map.height());
 
     auto shadow_hiz_size = glm::uvec2(
-        next_power_two(shadow_attachment.width()),
-        next_power_two(shadow_attachment.height()));
+        previous_power_two(shadow_attachment.width()),
+        previous_power_two(shadow_attachment.height()));
     auto shadow_hiz_mips = 1 + std::floor(std::log2(std::max(shadow_hiz_size.x, shadow_hiz_size.y)));
     auto shadow_hiz_map = iris::framebuffer_attachment_t::create_mips(
         shadow_hiz_size.x,
@@ -582,8 +582,8 @@ int main() {
             }
 
             hiz_size = glm::uvec2(
-                next_power_two(window.width),
-                next_power_two(window.height));
+                previous_power_two(window.width),
+                previous_power_two(window.height));
             hiz_mips = 1 + std::floor(std::log2(std::max(hiz_size.x, hiz_size.y)));
             hiz_map = iris::framebuffer_attachment_t::create_mips(
                 hiz_size.x,
@@ -739,32 +739,6 @@ int main() {
 
         glViewport(0, 0, window.width, window.height);
 
-        glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, -1, "hi_z_construct");
-        hiz_construct_shader
-            .bind()
-            .set(0, {  0_u32 })
-            .set(1, {  0_i32 })
-            .set(2, {  0_i32 })
-            .set(3, { -1_u32 });
-        offscreen_attachment[1].bind_texture(0);
-        hiz_map.bind_image_texture(1, 0, GL_FALSE, 0, GL_WRITE_ONLY);
-        glDispatchCompute(hiz_construct_wgc[0].x, hiz_construct_wgc[0].y, 1);
-        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-        for (auto i = 1_u32; i < hiz_mips; ++i) {
-            hiz_construct_shader
-                .set(0, {  i - 1 })
-                .set(1, {  0_i32 })
-                .set(2, {  0_i32 })
-                .set(3, { -1_u32 });
-            hiz_map.bind_texture(0);
-            glTextureParameteri(hiz_map.id(), GL_TEXTURE_BASE_LEVEL, i - 1);
-            hiz_map.bind_image_texture(1, i, GL_FALSE, 0, GL_WRITE_ONLY);
-            glDispatchCompute(hiz_construct_wgc[i].x, hiz_construct_wgc[i].y, 1);
-            glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
-        }
-        glTextureParameteri(hiz_map.id(), GL_TEXTURE_BASE_LEVEL, 0);
-        glPopDebugGroup();
-
         glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, -1, "depth_prepass");
         glEnable(GL_DEPTH_TEST);
         glEnable(GL_CULL_FACE);
@@ -843,36 +817,6 @@ int main() {
         glEnable(GL_DEPTH_CLAMP);
         for (auto layer = 0_u32; layer < CASCADE_COUNT; layer++) {
             // cull first
-            /*glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, -1, "shadow_hi_z_construct");
-            glTextureParameteri(shadow_attachment.id(), GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-            glTextureParameteri(shadow_attachment.id(), GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-            hiz_construct_shader
-                .bind()
-                .set(0, { 0_u32 })
-                .set(1, { 0_i32 })
-                .set(2, { 0_i32 })
-                .set(3, { layer });
-            shadow_attachment.bind_texture(0);
-            shadow_hiz_map.bind_image_texture(1, 0, GL_FALSE, 0, GL_WRITE_ONLY);
-            glDispatchCompute(shadow_hiz_construct_wgc[0].x, shadow_hiz_construct_wgc[0].y, 1);
-            glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-            for (auto i = 1_u32; i < shadow_hiz_mips; ++i) {
-                hiz_construct_shader
-                    .set(0, { i - 1 })
-                    .set(1, { 0_i32 })
-                    .set(2, { 0_i32 })
-                    .set(3, { layer });
-                shadow_hiz_map.bind_texture(0);
-                glTextureParameteri(shadow_hiz_map.id(), GL_TEXTURE_BASE_LEVEL, i - 1);
-                shadow_hiz_map.bind_image_texture(1, i, GL_FALSE, 0, GL_WRITE_ONLY);
-                glDispatchCompute(shadow_hiz_construct_wgc[i].x, shadow_hiz_construct_wgc[i].y, 1);
-                glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
-            }
-            glTextureParameteri(shadow_hiz_map.id(), GL_TEXTURE_BASE_LEVEL, 0);
-            glTextureParameteri(shadow_attachment.id(), GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-            glTextureParameteri(shadow_attachment.id(), GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-            glPopDebugGroup();*/
-
             shadow_fbo.bind();
             shadow_fbo.set_layer(0, layer);
             frustum_buffer.bind_range(0, (layer + 1) * sizeof(iris::frustum_t), sizeof(iris::frustum_t));
@@ -963,6 +907,64 @@ int main() {
                 group_count_offset += sizeof(iris::uint32);
             }
         }
+        glPopDebugGroup();
+
+        glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, -1, "hi_z_construct");
+        hiz_construct_shader
+            .bind()
+            .set(0, {  0_u32 })
+            .set(1, {  0_i32 })
+            .set(2, {  0_i32 })
+            .set(3, { -1_u32 });
+        offscreen_attachment[1].bind_texture(0);
+        hiz_map.bind_image_texture(1, 0, GL_FALSE, 0, GL_WRITE_ONLY);
+        glDispatchCompute(hiz_construct_wgc[0].x, hiz_construct_wgc[0].y, 1);
+        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+        for (auto i = 1_u32; i < hiz_mips; ++i) {
+            hiz_construct_shader
+                .set(0, {  i - 1 })
+                .set(1, {  0_i32 })
+                .set(2, {  0_i32 })
+                .set(3, { -1_u32 });
+            hiz_map.bind_texture(0);
+            glTextureParameteri(hiz_map.id(), GL_TEXTURE_BASE_LEVEL, i - 1);
+            hiz_map.bind_image_texture(1, i, GL_FALSE, 0, GL_WRITE_ONLY);
+            glDispatchCompute(hiz_construct_wgc[i].x, hiz_construct_wgc[i].y, 1);
+            glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+        }
+        glTextureParameteri(hiz_map.id(), GL_TEXTURE_BASE_LEVEL, 0);
+        glPopDebugGroup();
+
+        glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, -1, "shadow_hi_z_construct");
+        glTextureParameteri(shadow_attachment.id(), GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTextureParameteri(shadow_attachment.id(), GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        for (auto layer = 0_u32; layer < CASCADE_COUNT; ++layer) {
+            hiz_construct_shader
+                .bind()
+                .set(0, { 0_u32 })
+                .set(1, { 0_i32 })
+                .set(2, { 0_i32 })
+                .set(3, { layer });
+            shadow_attachment.bind_texture(0);
+            shadow_hiz_map.bind_image_texture(1, 0, GL_FALSE, 0, GL_WRITE_ONLY);
+            glDispatchCompute(shadow_hiz_construct_wgc[0].x, shadow_hiz_construct_wgc[0].y, 1);
+            glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+            for (auto i = 1_u32; i < shadow_hiz_mips; ++i) {
+                hiz_construct_shader
+                    .set(0, { i - 1 })
+                    .set(1, { 0_i32 })
+                    .set(2, { 0_i32 })
+                    .set(3, { layer });
+                shadow_hiz_map.bind_texture(0);
+                glTextureParameteri(shadow_hiz_map.id(), GL_TEXTURE_BASE_LEVEL, i - 1);
+                shadow_hiz_map.bind_image_texture(1, i, GL_FALSE, 0, GL_WRITE_ONLY);
+                glDispatchCompute(shadow_hiz_construct_wgc[i].x, shadow_hiz_construct_wgc[i].y, 1);
+                glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+            }
+            glTextureParameteri(shadow_hiz_map.id(), GL_TEXTURE_BASE_LEVEL, 0);
+        }
+        glTextureParameteri(shadow_attachment.id(), GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTextureParameteri(shadow_attachment.id(), GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glPopDebugGroup();
 
         glDisable(GL_DEPTH_TEST);

@@ -167,10 +167,6 @@ bool project_sphere(in vec3 center, in float radius, out vec4 aabb) {
 }
 
 bool is_object_occluded(in object_info_t object, in mat4 model) {
-    if (u_cascade_layer != -1) {
-        return false;
-    }
-
     const vec3 center = vec3(model * vec4(object.sphere.xyz, 1.0));
     //const vec3 center = vec3(model[3]);
     const float scale = max(max(length(model[0]), length(model[1])), length(model[2]));
