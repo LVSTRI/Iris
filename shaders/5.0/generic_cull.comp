@@ -1,4 +1,5 @@
 #version 460 core
+#define CASCADE_COUNT 4
 #define INVOCATION_SIZE 256
 
 struct indirect_command_t {
@@ -25,6 +26,7 @@ struct object_info_t {
     uint group_index;
     uint group_offset;
 
+    vec4 scale;
     vec4 sphere; // w is radius
     aabb_t aabb;
     indirect_command_t command;
@@ -34,12 +36,23 @@ struct object_index_shift_t {
     uint object_id;
 };
 
+struct cascade_data_t {
+    mat4 projection;
+    mat4 view;
+    mat4 pv;
+    mat4 global;
+    vec4 scale;
+    vec4 offset; // w is split
+};
+
 layout (local_size_x = INVOCATION_SIZE, local_size_y = 1, local_size_z = 1) in;
 
 layout (location = 0) uniform uint u_draw_count;
 layout (location = 1) uniform uint u_object_count;
 layout (location = 2) uniform uint u_disable_frustum_culling;
 layout (location = 3) uniform uint u_disable_near_culling;
+layout (location = 4) uniform uint u_cascade_layer;
+layout (location = 5) uniform sampler2D u_hiz_map;
 
 layout (std430, binding = 0) readonly restrict buffer b_frustum {
     // xyz => normal
@@ -70,6 +83,20 @@ layout (std430, binding = 5) restrict buffer b_draw_count {
 layout (std430, binding = 6) writeonly restrict buffer b_object_index_shift {
     object_index_shift_t[] object_shift;
 };
+
+layout (std430, binding = 7) readonly restrict buffer b_cascade_data {
+    cascade_data_t[CASCADE_COUNT] cascades;
+};
+
+layout (std140, binding = 8) uniform u_camera {
+    mat4 inf_projection;
+    mat4 projection;
+    mat4 view;
+    mat4 pv;
+    vec3 position;
+    float near;
+    float far;
+} camera;
 
 bool is_aabb_inside_plane(in aabb_t aabb, in vec4 plane) {
     const vec3 normal = plane.xyz;
@@ -113,6 +140,67 @@ bool is_object_visible(in aabb_t aabb, in mat4 model) {
     return true;
 }
 
+bool project_sphere(in vec3 center, in float radius, out vec4 aabb) {
+    if (center.z < radius + camera.near) {
+        return false;
+    }
+
+    const vec2 cx = -center.xz;
+    const vec2 vx = vec2(sqrt(dot(cx, cx) - radius * radius), radius);
+    const vec2 min_x = mat2(vx.x, vx.y, -vx.y, vx.x) * cx;
+    const vec2 max_x = mat2(vx.x, -vx.y, vx.y, vx.x) * cx;
+
+    const vec2 cy = -center.yz;
+    const vec2 vy = vec2(sqrt(dot(cy, cy) - radius * radius), radius);
+    const vec2 min_y = mat2(vy.x, vy.y, -vy.y, vy.x) * cy;
+    const vec2 max_y = mat2(vy.x, -vy.y, vy.y, vy.x) * cy;
+
+    const float p00 = camera.projection[0][0];
+    const float p11 = camera.projection[1][1];
+    aabb = vec4(
+        min_x.x / min_x.y * p00,
+        min_y.x / min_y.y * p11,
+        max_x.x / max_x.y * p00,
+        max_y.x / max_y.y * p11);
+    aabb = aabb.xwzy * 0.5 + 0.5;
+    return true;
+}
+
+bool is_object_occluded(in object_info_t object, in mat4 model) {
+    if (u_cascade_layer != -1) {
+        return false;
+    }
+
+    const vec3 center = vec3(model * vec4(object.sphere.xyz, 1.0));
+    //const vec3 center = vec3(model[3]);
+    const float scale = max(max(length(model[0]), length(model[1])), length(model[2]));
+    const float radius = scale * object.sphere.w + 2.0;
+    vec4 view_center = camera.view * vec4(center, 1.0);
+    view_center.xyz /= view_center.w;
+    view_center.z *= -1;
+    vec4 aabb;
+    if (project_sphere(view_center.xyz, radius, aabb)) {
+        const vec2 hiz_size = vec2(textureSize(u_hiz_map, 0).xy);
+        const vec2 scale = 1.0 / hiz_size;
+        const float max_mip = floor(log2(max(hiz_size.x, hiz_size.y)));
+
+        const float p_width = abs((aabb.z - aabb.x) * hiz_size.x);
+        const float p_height = abs((aabb.w - aabb.y) * hiz_size.y);
+        const float level = min(floor(log2(max(p_width, p_height))), max_mip);
+        const vec2 uv = (aabb.xy + aabb.zw) * 0.5;
+        const vec4 samples = vec4(
+            textureLodOffset(u_hiz_map, uv, level, ivec2(0, 0)).r,
+            textureLodOffset(u_hiz_map, uv, level, ivec2(0, 1)).r,
+            textureLodOffset(u_hiz_map, uv, level, ivec2(1, 0)).r,
+            textureLodOffset(u_hiz_map, uv, level, ivec2(1, 1)).r);
+        const float max_z = max(max(max(samples.x, samples.y), samples.z), samples.w);
+        const float sphere_z = 1.0 - (camera.near / (view_center.z - radius));
+
+        return sphere_z > max_z;
+    }
+    return false;
+}
+
 void main() {
     const uint index = gl_GlobalInvocationID.x;
     if (index < u_object_count) {
@@ -120,7 +208,9 @@ void main() {
         const mat4 local_transform = local_transforms[object.local_transform];
         const mat4 global_transform = global_transforms[object.global_transform];
         const mat4 model = global_transform * local_transform;
-        if (bool(u_disable_frustum_culling) || is_object_visible(object.aabb, model)) {
+
+        const bool pass_frustum_cull = bool(u_disable_frustum_culling) || is_object_visible(object.aabb, model);
+        if (pass_frustum_cull && !is_object_occluded(object, model)) {
             // slot translates to gl_DrawID
             const uint slot = atomicAdd(draw_count[object.group_index], 1);
             indirect_commands[slot + object.group_offset] = object.command;

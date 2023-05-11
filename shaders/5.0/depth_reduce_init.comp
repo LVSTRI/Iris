@@ -9,6 +9,7 @@ layout (location = 0) uniform sampler2D u_depth;
 layout (rg32f, binding = 0) uniform restrict writeonly image2D u_out_depth;
 
 layout (std140, binding = 1) uniform u_camera {
+    mat4 inf_projection;
     mat4 projection;
     mat4 view;
     mat4 pv;

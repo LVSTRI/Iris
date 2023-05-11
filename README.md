@@ -15,6 +15,7 @@ The keybindings are as follows:
 - `Space`: Raises the camera's y;
 - `F`: Displays the AABB boxes of the objects;
 - `G`: Toggles between PSSM and PSSM + SDSM;
+- `C`: Toggles frustum culling freeze;
 - `Right Mouse Button`: Enables the camera to be moved around;
 - `Left Mouse Button`: Pick objects in 3D space;
 

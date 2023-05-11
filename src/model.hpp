@@ -41,6 +41,7 @@ namespace iris {
         mesh_t mesh = {};
         aabb_t aabb = {};
         glm::vec4 sphere = {};
+        glm::vec3 scale = {};
 
         uint32 diffuse_texture = 0;
         uint32 normal_texture = 0;

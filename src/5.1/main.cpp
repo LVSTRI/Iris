@@ -301,6 +301,7 @@ int main() {
     glEnable(GL_FRAMEBUFFER_SRGB);
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
+    glClipControl(GL_LOWER_LEFT, GL_ZERO_TO_ONE);
 
     auto camera = iris::camera_t::create(window);
     auto model = iris::meshlet_model_t::create("../models/compressed/bistro/bistro.glb");

@@ -38,6 +38,7 @@ layout (location = 1) uniform sampler2DArrayShadow shadow_map;
 layout (location = 2) uniform sampler2D blue_noise;
 
 layout (std140, binding = 0) uniform u_camera {
+    mat4 inf_projection;
     mat4 projection;
     mat4 view;
     mat4 pv;
@@ -114,21 +115,13 @@ vec3 sample_shadow(in vec3 shadow_frag_pos,
 
     //const vec2 bias_uv = calcualte_depth_plane_bias(ddx_shadow_frag_pos, ddy_shadow_frag_pos);
     //const float plane_bias = min(dot(vec2(1.0) * texel_size, abs(bias_uv)), 0.05);
-    const float width = 0.00875;
+    const float width = float[](0.00075, 0.0001, 0.00085, 0.000075)[cascade];
     const vec3 halfway = normalize(light_dir + normal);
-    float bias = clamp((width / 2.0) * tan(acos(abs(clamp(max(dot(normal, halfway), dot(halfway, light_dir)), -1.0, 1.0)))), 0.0, width);
-    //float bias = clamp((width / 2.0) * tan(acos(abs(clamp(dot(normal, light_dir), -1.0, 1.0)))), 0.0, width);
+    //float bias = clamp((width / 2.0) * tan(acos(abs(clamp(max(dot(normal, halfway), dot(halfway, light_dir)), -1.0, 1.0)))), 0.0, width);
+    float bias = clamp((width / 2.0) * tan(acos(abs(clamp(dot(normal, light_dir), -1.0, 1.0)))), 0.0, width);
     const float prev_split = cascade == 0 ? 0.0 : cascades[cascade - 1].offset.w;
     const float next_split = cascades[cascade].offset.w;
-    const float bias_scale_lerp = clamp((depth_vs - prev_split) / (next_split - prev_split), 0.0, 1.0);
-    const vec2[] bias_scales = vec2[](
-        vec2(1.0, 2.0),
-        vec2(2.0, 2.5),
-        vec2(2.5, 3.0),
-        vec2(3.0, 4.0));
-
-    bias /= mix(bias_scales[cascade].x, bias_scales[cascade].y, bias_scale_lerp);
-    const float light_depth = shadow_frag_pos.z - bias;
+    const float light_depth = shadow_frag_pos.z + bias;
     const float kernel_radius = float[](4.0, 3.0, 2.0, 1.0)[cascade];
     const uint sample_count = 64;
     vec3 shadow_factor = vec3(0.0);

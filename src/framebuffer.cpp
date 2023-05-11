@@ -36,7 +36,8 @@ namespace iris {
             int32 format,
             int32 base_format,
             uint32 type,
-            bool nearest) noexcept -> self {
+            bool nearest,
+            bool border) noexcept -> self {
         auto attachment = self();
         const auto target = layers == 1 ? GL_TEXTURE_2D : GL_TEXTURE_2D_ARRAY;
 
@@ -54,14 +55,70 @@ namespace iris {
             glTextureParameteri(attachment._id, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
             glTextureParameteri(attachment._id, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         }
-        glTextureParameteri(attachment._id, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-        glTextureParameteri(attachment._id, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-        const auto color = std::to_array({ 1.0f, 1.0f, 1.0f, 1.0f });
-        glTextureParameterfv(attachment._id, GL_TEXTURE_BORDER_COLOR, color.data());
+
+        if (border) {
+            glTextureParameteri(attachment._id, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+            glTextureParameteri(attachment._id, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+            const auto color = std::to_array({ 1.0f, 1.0f, 1.0f, 1.0f });
+            glTextureParameterfv(attachment._id, GL_TEXTURE_BORDER_COLOR, color.data());
+        } else {
+            glTextureParameteri(attachment._id, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTextureParameteri(attachment._id, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        }
 
         attachment._width = width;
         attachment._height = height;
         attachment._layers = layers;
+        attachment._levels = 1;
+        attachment._format = format;
+        attachment._base_format = base_format;
+        attachment._type = type;
+        attachment._target = target;
+        return attachment;
+    }
+
+    auto framebuffer_attachment_t::create_mips(
+            uint32 width,
+            uint32 height,
+            uint32 layers,
+            uint32 levels,
+            int32 format,
+            int32 base_format,
+            uint32 type,
+            bool nearest,
+            bool border) noexcept -> self {
+        auto attachment = self();
+        const auto target = layers == 1 ? GL_TEXTURE_2D : GL_TEXTURE_2D_ARRAY;
+
+        glCreateTextures(target, 1, &attachment._id);
+
+        if (layers > 1) {
+            glTextureStorage3D(attachment._id, levels, format, width, height, layers);
+        } else {
+            glTextureStorage2D(attachment._id, levels, format, width, height);
+        }
+        if (nearest) {
+            glTextureParameteri(attachment._id, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+            glTextureParameteri(attachment._id, GL_TEXTURE_MAG_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+
+        } else {
+            glTextureParameteri(attachment._id, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTextureParameteri(attachment._id, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        }
+        if (border) {
+            glTextureParameteri(attachment._id, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+            glTextureParameteri(attachment._id, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+            const auto color = std::to_array({ 1.0f, 1.0f, 1.0f, 1.0f });
+            glTextureParameterfv(attachment._id, GL_TEXTURE_BORDER_COLOR, color.data());
+        } else {
+            glTextureParameteri(attachment._id, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTextureParameteri(attachment._id, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        }
+
+        attachment._width = width;
+        attachment._height = height;
+        attachment._layers = layers;
+        attachment._levels = levels;
         attachment._format = format;
         attachment._base_format = base_format;
         attachment._type = type;
@@ -83,6 +140,10 @@ namespace iris {
 
     auto framebuffer_attachment_t::layers() const noexcept -> uint32 {
         return _layers;
+    }
+
+    auto framebuffer_attachment_t::levels() const noexcept -> uint32 {
+        return _levels;
     }
 
     auto framebuffer_attachment_t::format() const noexcept -> uint32 {
@@ -121,6 +182,7 @@ namespace iris {
         swap(_width, other._width);
         swap(_height, other._height);
         swap(_layers, other._layers);
+        swap(_levels, other._levels);
         swap(_format, other._format);
         swap(_base_format, other._base_format);
         swap(_type, other._type);
@@ -212,6 +274,17 @@ namespace iris {
                 u_attachment.id(),
                 0,
                 layer);
+        }
+    }
+
+    auto framebuffer_t::set_level(uint32 index, uint32 level) const noexcept -> void {
+        const auto& u_attachment = _attachments[index].get();
+        if (u_attachment.levels() > 1) {
+            glNamedFramebufferTexture(
+                _id,
+                base_format_to_attachment(u_attachment.base_format()),
+                u_attachment.id(),
+                level);
         }
     }
 

@@ -26,6 +26,7 @@ struct object_info_t {
     uint group_index;
     uint group_offset;
 
+    vec4 scale;
     vec4 sphere; // w is radius
     aabb_t aabb;
     indirect_command_t command;
@@ -43,6 +44,7 @@ layout (location = 3) in vec4 i_tangent;
 layout (location = 0) uniform uint group_offset;
 
 layout (std140, binding = 0) uniform u_camera {
+    mat4 inf_projection;
     mat4 projection;
     mat4 view;
     mat4 pv;

@@ -85,8 +85,25 @@ namespace iris {
         return glm::lookAt(_position, _position + _front, _up);
     }
 
-    auto camera_t::projection() const noexcept -> glm::mat4 {
-        return glm::perspective(glm::radians(_fov), aspect(), _near, _far);
+    auto camera_t::projection(bool infinite, bool reverse_z) const noexcept -> glm::mat4 {
+        const auto type = ((uint32(infinite) << 1u) | uint32(reverse_z));
+        switch (type) {
+            case 0b00u:
+                return glm::perspective(fov(), aspect(), _near, _far);
+            case 0b01u:
+                return glm::perspective(fov(), aspect(), _far, _near);
+            case 0b10u:
+                return glm::infinitePerspective(fov(), aspect(), _near);
+            case 0b11u:
+                const auto f = 1.0f / glm::tan(fov() / 2.0f);
+                return {
+                    f / aspect(), 0.0f, 0.0f, 0.0f,
+                    0.0f, f, 0.0f, 0.0f,
+                    0.0f, 0.0f, 0.0f, -1.0f,
+                    0.0f, 0.0f, _near, 0.0f
+                };
+        }
+        return {};
     }
 
     auto camera_t::update(iris::float32 dt) noexcept -> void {
@@ -150,14 +167,14 @@ namespace iris {
         auto frustum = frustum_t();
         const auto inv_pv = glm::inverse(pv);
         auto corners = std::to_array({
-            glm::vec3( 1.0f, -1.0f, -1.0f),
-            glm::vec3(-1.0f, -1.0f, -1.0f),
-            glm::vec3( 1.0f,  1.0f, -1.0f),
-            glm::vec3(-1.0f,  1.0f, -1.0f),
-            glm::vec3( 1.0f, -1.0f,  1.0f),
-            glm::vec3(-1.0f, -1.0f,  1.0f),
-            glm::vec3( 1.0f,  1.0f,  1.0f),
-            glm::vec3(-1.0f,  1.0f,  1.0f),
+            glm::vec3( 1.0f, -1.0f, 0.0f),
+            glm::vec3(-1.0f, -1.0f, 0.0f),
+            glm::vec3( 1.0f,  1.0f, 0.0f),
+            glm::vec3(-1.0f,  1.0f, 0.0f),
+            glm::vec3( 1.0f, -1.0f, 1.0f),
+            glm::vec3(-1.0f, -1.0f, 1.0f),
+            glm::vec3( 1.0f,  1.0f, 1.0f),
+            glm::vec3(-1.0f,  1.0f, 1.0f),
         });
 
         for (auto& each : corners) {
@@ -165,7 +182,6 @@ namespace iris {
             each = corner / corner.w;
         }
 
-        auto planes = std::array<plane_t, 6>();
         frustum.planes[0] = plane_from_points(corners[0], corners[4], corners[2]);
         frustum.planes[1] = plane_from_points(corners[1], corners[3], corners[5]);
         frustum.planes[2] = plane_from_points(corners[1], corners[5], corners[0]);

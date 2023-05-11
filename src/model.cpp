@@ -148,8 +148,8 @@ namespace iris {
                     }
                     auto sphere = glm::vec4();
                     auto aabb = aabb_t();
-                    aabb.min = glm::vec3(std::numeric_limits<float>::max());
-                    aabb.max = glm::vec3(std::numeric_limits<float>::lowest());
+                    aabb.min = glm::vec3(std::numeric_limits<float32>::max());
+                    aabb.max = glm::vec3(std::numeric_limits<float32>::lowest());
                     vertices.resize(vertex_count);
                     for (auto l = 0_u32; l < vertex_count; ++l) {
                         std::memcpy(&vertices[l].position, position_ptr + l, sizeof(glm::vec3));
@@ -165,13 +165,17 @@ namespace iris {
 
                         aabb.min = glm::min(aabb.min, vertices[l].position);
                         aabb.max = glm::max(aabb.max, vertices[l].position);
-                    }
-                    for (auto& vertex : vertices) {
-                        sphere.w = glm::max(sphere.w, glm::length(vertex.position - aabb.center));
+                        sphere += glm::vec4(vertices[l].position, 0.0f);
                     }
                     aabb.center = (aabb.min + aabb.max) / 2.0f;
                     aabb.extent = aabb.max - aabb.center;
-                    sphere = glm::vec4(aabb.center, sphere.w);
+                    sphere /= static_cast<float32>(vertex_count);
+                    //sphere = glm::make_vec4(aabb.center);
+
+                    for (auto& vertex : vertices) {
+                        sphere.w = glm::max(sphere.w, glm::distance(aabb.center, vertex.position));
+                    }
+
                     auto indices = std::vector<uint32>();
                     {
                         const auto& accessor = *primitive.indices;
@@ -241,6 +245,10 @@ namespace iris {
 
                     auto m_mesh = mesh_pool.make_mesh(vertices, indices, vertex_format_as_attributes());
                     auto& object = model._objects.emplace_back();
+                    object.scale = glm::vec3(1.0f);
+                    if (node.has_scale) {
+                        object.scale = glm::vec3(node.scale[0], node.scale[1], node.scale[2]);
+                    }
                     object.mesh = std::move(m_mesh);
                     object.aabb = aabb;
                     object.sphere = sphere;

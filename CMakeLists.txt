@@ -64,6 +64,7 @@ add_library(Iris STATIC
     src/mesh_pool.cpp
     src/mesh_pool.hpp)
 
+target_compile_definitions(Iris PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
 target_link_libraries(Iris PUBLIC glad glfw glm cgltf stb meshoptimizer ktx)
 target_include_directories(Iris PUBLIC src)
 

@@ -70,7 +70,7 @@ namespace iris {
         auto far() const noexcept -> iris::float32;
 
         auto view() const noexcept -> glm::mat4;
-        auto projection() const noexcept -> glm::mat4;
+        auto projection(bool infinite = false, bool reverse_z = false) const noexcept -> glm::mat4;
 
         auto update(iris::float32 dt) noexcept -> void;
 
