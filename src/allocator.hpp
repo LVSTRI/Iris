@@ -7,7 +7,7 @@
 
 namespace iris {
     class allocator_t;
-    struct buffer_t;
+    class buffer_t;
     class buffer_slice_t {
     public:
         using self = buffer_slice_t;

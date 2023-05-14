@@ -5,6 +5,8 @@
 models/*
 !models/README.md
 !models/deccer-cubes
+!models/convert.bat
+!models/convert.sh
 .idea
 .idea/*
 /textures/16_16/

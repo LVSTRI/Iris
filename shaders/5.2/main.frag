@@ -26,16 +26,20 @@ layout (early_fragment_tests) in;
 layout (location = 0) in flat uint i_diffuse_texture;
 layout (location = 1) in flat uint i_normal_texture;
 layout (location = 2) in flat uint i_specular_texture;
-layout (location = 3) in flat uint i_draw_id;
+layout (location = 3) in flat uint i_object_id;
 layout (location = 4) in vec3 i_normal;
 layout (location = 5) in vec2 i_uv;
 layout (location = 6) in vec3 i_frag_pos;
 layout (location = 7) in mat3 i_TBN;
+layout (location = 10) in vec4 i_clip_pos;
+layout (location = 11) in vec4 i_prev_clip_pos;
 
 layout (location = 0) out vec4 o_pixel;
+layout (location = 1) out vec2 o_velocity;
 
-layout (location = 1) uniform sampler2DArrayShadow shadow_map;
-layout (location = 2) uniform sampler2D blue_noise;
+layout (location = 2) uniform sampler2DArrayShadow u_shadow_map;
+layout (location = 3) uniform sampler2D u_blue_noise;
+layout (location = 4) uniform vec2 u_resolution;
 
 layout (std140, binding = 0) uniform u_camera {
     mat4 inf_projection;
@@ -110,31 +114,31 @@ vec3 sample_shadow(in vec3 shadow_frag_pos,
     ddx_shadow_frag_pos *= cascades[cascade].scale.xyz;
     ddy_shadow_frag_pos *= cascades[cascade].scale.xyz;
 
-    const vec2 shadow_size = vec2(textureSize(shadow_map, 0));
+    const vec2 shadow_size = vec2(textureSize(u_shadow_map, 0));
     const vec2 texel_size = 1.0 / shadow_size;
 
     //const vec2 bias_uv = calcualte_depth_plane_bias(ddx_shadow_frag_pos, ddy_shadow_frag_pos);
     //const float plane_bias = min(dot(vec2(1.0) * texel_size, abs(bias_uv)), 0.05);
-    const float width = float[](0.00075, 0.00085, 0.001, 0.00125)[cascade];
+    const float width = float[](0.0035, 0.002025, 0.001425, 0.000325)[cascade] / 2.0;
     const vec3 halfway = normalize(light_dir + normal);
-    float bias = clamp((width / 2.0) * tan(acos(abs(clamp(max(dot(normal, halfway), dot(halfway, light_dir)), -1.0, 1.0)))), 0.0, width);
-    //float bias = clamp((width / 2.0) * tan(acos(abs(clamp(dot(normal, light_dir), -1.0, 1.0)))), 0.0, width);
-    //const float prev_split = cascade == 0 ? 0.0 : cascades[cascade - 1].offset.w;
-    //const float next_split = cascades[cascade].offset.w;
-    const float light_depth = shadow_frag_pos.z + bias;
-    const float kernel_radius = float[](4.0, 3.0, 2.0, 1.0)[cascade];
+    //float bias = clamp((width / 2.0) * tan(acos(abs(clamp(max(dot(normal, halfway), dot(halfway, light_dir)), -1.0, 1.0)))), 0.0, width);
+    float bias = clamp(width * tan(acos(abs(clamp(dot(normal, light_dir), -1.0, 1.0)))), 0.0, width);
+    const float prev_split = cascade == 0 ? 0.0 : cascades[cascade - 1].offset.w;
+    const float next_split = cascades[cascade].offset.w;
+    const float light_depth = shadow_frag_pos.z - bias;
+    const float kernel_radius = float[](4.0, 4.5, 3.5, 2.5)[cascade];
     const uint sample_count = 64;
     vec3 shadow_factor = vec3(0.0);
 
     for (uint i = 0; i < sample_count; ++i) {
-        const ivec2 noise_size = textureSize(blue_noise, 0);
+        const ivec2 noise_size = textureSize(u_blue_noise, 0);
         const ivec2 noise_texel = ivec2(int(gl_FragCoord.x) % noise_size.x, int(gl_FragCoord.y) % noise_size.y);
-        const vec2 xi = fract(sample_hammersley(i, sample_count) + texelFetch(blue_noise, noise_texel, 0).xy);
+        const vec2 xi = fract(sample_hammersley(i, sample_count) + texelFetch(u_blue_noise, noise_texel, 0).xy);
         const float r = sqrt(xi.x);
         const float theta = xi.y * 2.0 * M_PI;
         const vec2 offset = vec2(r * cos(theta), r * sin(theta));
         const vec2 s_uv = shadow_frag_pos.xy + offset * texel_size * kernel_radius;
-        shadow_factor += texture(shadow_map, vec4(s_uv, cascade, light_depth)).r;
+        shadow_factor += texture(u_shadow_map, vec4(s_uv, cascade, light_depth)).r;
     }
     vec3 shadow = shadow_factor / float(sample_count);
     /*switch (cascade) {
@@ -184,6 +188,18 @@ vec3 hsv_to_rgb(in vec3 hsv) {
     return hsv.z * mix(vec3(1.0), rgb, hsv.y);
 }
 
+vec2 calculate_velocity() {
+    vec4 clip_pos = i_clip_pos;
+    vec4 prev_clip_pos = i_prev_clip_pos;
+
+    clip_pos /= clip_pos.w;
+    prev_clip_pos /= prev_clip_pos.w;
+
+    prev_clip_pos.xy = prev_clip_pos.xy * 0.5 + 0.5;
+    clip_pos.xy = clip_pos.xy * 0.5 + 0.5;
+    return clip_pos.xy - prev_clip_pos.xy;
+}
+
 void main() {
     const float ambient_factor = 0.025;
     vec3 diffuse = vec3(1.0);
@@ -202,7 +218,7 @@ void main() {
     const float depth_vs = (camera.pv * vec4(i_frag_pos, 1.0)).w;
     const uint cascade = calculate_cascade(depth_vs);
 
-    //vec3 hsv = vec3(fract(M_GOLDEN_CONJ * (i_draw_id * gl_PrimitiveID + 1)), 0.875, 0.85);
+    //vec3 hsv = vec3(fract(M_GOLDEN_CONJ * (object_id * gl_PrimitiveID + 1)), 0.875, 0.85);
     //if (i_diffuse_texture == -1) {
     //    hsv = vec3(0.0, 0.0, 0.0);
     //}
@@ -218,4 +234,5 @@ void main() {
         calculate_shadow(directional_lights[0], normal, depth_vs, cascade);
 
     o_pixel = vec4(color, 1.0);
+    o_velocity = calculate_velocity();
 }

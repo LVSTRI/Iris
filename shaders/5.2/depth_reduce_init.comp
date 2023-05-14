@@ -1,0 +1,53 @@
+#version 460 core
+#define INVOCATION_SIZE 16
+#define INVOCATION_THREADS (INVOCATION_SIZE * INVOCATION_SIZE)
+
+layout (local_size_x = INVOCATION_SIZE, local_size_y = INVOCATION_SIZE, local_size_z = 1) in;
+
+layout (location = 0) uniform sampler2D u_depth;
+
+layout (rg32f, binding = 0) uniform restrict writeonly image2D u_out_depth;
+
+layout (std140, binding = 1) uniform u_camera {
+    mat4 inf_projection;
+    mat4 projection;
+    mat4 view;
+    mat4 pv;
+    vec3 position;
+    float near;
+    float far;
+} camera;
+
+shared vec2 shared_depth[INVOCATION_THREADS];
+
+void main() {
+    // load
+    const ivec2 position = min(ivec2(gl_GlobalInvocationID.xy), textureSize(u_depth, 0) - 1);
+    float depth_sample = texelFetch(u_depth, position, 0).r;
+    float c_min = 1.0;
+    float c_max = 0.0;
+    // linearize Z
+    if (depth_sample < 1.0) {
+        // depth_sample = 2.0 * depth_sample - 1.0;
+        depth_sample = (2.0 * camera.near * camera.far) / (camera.far + camera.near - depth_sample * (camera.far - camera.near));
+        depth_sample = clamp((depth_sample - camera.near) / (camera.far - camera.near), 0.0, 1.0);
+        c_min = min(c_min, depth_sample);
+        c_max = max(c_max, depth_sample);
+    }
+    shared_depth[gl_LocalInvocationIndex] = vec2(c_min, c_max);
+    barrier();
+
+    for (uint i = INVOCATION_THREADS / 2; i > 0; i >>= 1) {
+        if (gl_LocalInvocationIndex < i) {
+            const vec2 d1 = shared_depth[gl_LocalInvocationIndex];
+            const vec2 d2 = shared_depth[gl_LocalInvocationIndex + i];
+            shared_depth[gl_LocalInvocationIndex].x = min(d1.x, d2.x);
+            shared_depth[gl_LocalInvocationIndex].y = max(d1.y, d2.y);
+        }
+        barrier();
+    }
+
+    if (gl_LocalInvocationIndex == 0) {
+        imageStore(u_out_depth, ivec2(gl_WorkGroupID.xy), vec4(shared_depth[0].xy, 0.0, 0.0));
+    }
+}

@@ -10,6 +10,8 @@
 
 #include <cgltf.h>
 
+#include <algorithm>
+#include <ranges>
 #include <vector>
 #include <queue>
 
@@ -165,15 +167,15 @@ namespace iris {
 
                         aabb.min = glm::min(aabb.min, vertices[l].position);
                         aabb.max = glm::max(aabb.max, vertices[l].position);
-                        sphere += glm::vec4(vertices[l].position, 0.0f);
+                        //sphere += glm::vec4(vertices[l].position, 0.0f);
                     }
                     aabb.center = (aabb.min + aabb.max) / 2.0f;
                     aabb.extent = aabb.max - aabb.center;
-                    sphere /= static_cast<float32>(vertex_count);
-                    //sphere = glm::make_vec4(aabb.center);
+                    //sphere /= static_cast<float32>(vertex_count);
+                    sphere = glm::make_vec4(aabb.center);
 
                     for (auto& vertex : vertices) {
-                        sphere.w = glm::max(sphere.w, glm::distance(aabb.center, vertex.position));
+                        sphere.w = glm::max(sphere.w, glm::distance(glm::vec3(sphere), vertex.position));
                     }
 
                     auto indices = std::vector<uint32>();
@@ -472,9 +474,9 @@ namespace iris {
                     meshlet_triangles.resize(last_meshlet.triangle_offset + ((last_meshlet.triangle_count * 3 + 3) & ~3));
                     meshlets.resize(meshlet_count);
 
-                    meshlet_model._vertices.insert_range(meshlet_model._vertices.end(), vertices);
-                    meshlet_model._indices.insert_range(meshlet_model._indices.end(), meshlet_vertices);
-                    meshlet_model._triangles.insert_range(meshlet_model._triangles.end(), meshlet_triangles);
+                    meshlet_model._vertices.insert(meshlet_model._vertices.end(), vertices.begin(), vertices.end());
+                    meshlet_model._indices.insert(meshlet_model._indices.end(), meshlet_vertices.begin(), meshlet_vertices.end());
+                    meshlet_model._triangles.insert(meshlet_model._triangles.end(), meshlet_triangles.begin(), meshlet_triangles.end());
 
                     auto& meshlet_group = meshlet_model._meshlet_groups.emplace_back();
                     {

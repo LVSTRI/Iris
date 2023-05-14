@@ -6,6 +6,7 @@
 #include <array>
 #include <tuple>
 #include <utility>
+#include <ranges>
 #include <functional>
 #include <optional>
 
@@ -307,13 +308,13 @@ int main() {
     auto model = iris::meshlet_model_t::create("../models/compressed/bistro/bistro.glb");
 
     auto vertices = std::vector<iris::meshlet_vertex_format_t>();
-    vertices.insert_range(vertices.end(), model.vertices());
+    vertices.insert(vertices.end(), model.vertices().begin(), model.vertices().end());
 
     auto indices = std::vector<iris::uint32>();
-    indices.insert_range(indices.end(), model.indices());
+    indices.insert(indices.end(), model.indices().begin(), model.indices().end());
 
     auto triangles = std::vector<iris::uint32>();
-    triangles.insert_range(triangles.end(), model.triangles());
+    triangles.insert(triangles.end(), model.triangles().begin(), model.triangles().end());
 
     struct raw_meshlet_t {
         iris::meshlet_t meshlet = {};

@@ -82,6 +82,9 @@ namespace iris {
             case KTX_TTF_BC7_RGBA:
                 format = GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM;
                 break;
+
+            default:
+                break;
         }
 
         glCreateTextures(GL_TEXTURE_2D, 1, &texture._id);

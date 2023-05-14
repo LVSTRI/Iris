@@ -36,12 +36,15 @@ add_subdirectory(deps/meshoptimizer)
 set(KTX_FEATURE_TESTS OFF CACHE BOOL "" FORCE)
 set(KTX_FEATURE_VULKAN OFF CACHE BOOL "" FORCE)
 set(KTX_FEATURE_GL_UPLOAD OFF CACHE BOOL "" FORCE)
+set(KTX_FEATURE_WRITE OFF CACHE BOOL "" FORCE)
 add_subdirectory(deps/KTX-Software)
+
+set_property(TARGET ktx PROPERTY CXX_STANDARD 17)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     target_compile_options(ktx PRIVATE /w)
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(ktx PRIVATE -march=native -Wno-error)
+    target_compile_options(ktx PRIVATE -march=native -Wno-everything)
 endif()
 
 add_library(Iris STATIC
@@ -67,6 +70,7 @@ add_library(Iris STATIC
 target_compile_definitions(Iris PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
 target_link_libraries(Iris PUBLIC glad glfw glm cgltf stb meshoptimizer ktx)
 target_include_directories(Iris PUBLIC src)
+target_compile_options(Iris PRIVATE -Wall -Wextra -Wpedantic -Wno-language-extension-token)
 
 add_executable(MousePicking src/2.1/main.cpp)
 target_link_libraries(MousePicking PUBLIC Iris)
@@ -88,3 +92,6 @@ target_link_libraries(IndirectDrawing PUBLIC Iris)
 
 add_executable(MeshShading src/5.1/main.cpp)
 target_link_libraries(MeshShading PUBLIC Iris)
+
+add_executable(AntiAliasing src/5.2/main.cpp)
+target_link_libraries(AntiAliasing PUBLIC Iris)
