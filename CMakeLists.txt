@@ -41,6 +41,29 @@ add_subdirectory(deps/KTX-Software)
 
 set_property(TARGET ktx PROPERTY CXX_STANDARD 17)
 
+# imgui setup
+add_library(imgui STATIC
+    deps/imgui/imconfig.h
+    deps/imgui/imgui.h
+    deps/imgui/imgui.cpp
+    deps/imgui/imgui_demo.cpp
+    deps/imgui/imgui_draw.cpp
+    deps/imgui/imgui_internal.h
+    deps/imgui/imgui_tables.cpp
+    deps/imgui/imgui_widgets.cpp
+    deps/imgui/imstb_rectpack.h
+    deps/imgui/imstb_textedit.h
+    deps/imgui/imstb_truetype.h
+
+    deps/imgui/backends/imgui_impl_glfw.h
+    deps/imgui/backends/imgui_impl_glfw.cpp
+    deps/imgui/backends/imgui_impl_opengl3.h
+    deps/imgui/backends/imgui_impl_opengl3.cpp)
+target_include_directories(imgui PUBLIC
+    deps/imgui
+    deps/imgui/backends)
+target_link_libraries(imgui PUBLIC glad glfw)
+
 if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     target_compile_options(ktx PRIVATE /w)
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -68,9 +91,11 @@ add_library(Iris STATIC
     src/mesh_pool.hpp)
 
 target_compile_definitions(Iris PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
-target_link_libraries(Iris PUBLIC glad glfw glm cgltf stb meshoptimizer ktx)
+target_link_libraries(Iris PUBLIC glad glfw glm cgltf stb meshoptimizer ktx imgui)
 target_include_directories(Iris PUBLIC src)
-target_compile_options(Iris PRIVATE -Wall -Wextra -Wpedantic -Wno-language-extension-token)
+if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")
+    target_compile_options(Iris PRIVATE -march=native -mavx2 -Wall -Wextra -Wpedantic -Wno-language-extension-token)
+endif()
 
 add_executable(MousePicking src/2.1/main.cpp)
 target_link_libraries(MousePicking PUBLIC Iris)

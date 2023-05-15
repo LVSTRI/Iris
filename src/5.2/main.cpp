@@ -30,6 +30,10 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
 
+#include <imgui.h>
+#include <imgui_impl_glfw.h>
+#include <imgui_impl_opengl3.h>
+
 #define CASCADE_COUNT 4
 #define CULL_MODE_PERSPECTIVE_CAMERA 0
 #define CULL_MODE_ORTHOGRAPHIC_CAMERA 1
@@ -149,6 +153,10 @@ struct taa_pass_t {
     std::array<glm::vec2, 16> jitter;
 
     iris::uint32 frames = 0;
+};
+
+struct ui_state_t {
+    iris::uint32 cascade_index = 0;
 };
 
 static auto group_indirect_commands(std::span<const iris::model_t> models) noexcept
@@ -530,6 +538,12 @@ int main() {
     glTextureParameteri(shadow_attachment.id(), GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
     glTextureParameteri(shadow_attachment.id(), GL_TEXTURE_COMPARE_FUNC, GL_LESS);
 
+    auto shadow_views = std::vector<iris::uint32>(CASCADE_COUNT);
+    glGenTextures(CASCADE_COUNT, shadow_views.data());
+    for (auto i = 0_u32; i < CASCADE_COUNT; ++i) {
+        glTextureView(shadow_views[i], GL_TEXTURE_2D, shadow_attachment.id(), GL_DEPTH_COMPONENT16, 0, 1, i, 1);
+    }
+
     auto depth_reduce_wgc = calculate_wg_from_resolution(window.width, window.height);
     auto depth_reduce_attachments = std::vector<iris::framebuffer_attachment_t>();
     depth_reduce_attachments.reserve(depth_reduce_wgc.size());
@@ -562,6 +576,39 @@ int main() {
         std::cref(shadow_attachment)
     });
 
+    auto ui_state = ui_state_t();
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    {
+        auto& io = ImGui::GetIO();
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+        io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+        //io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+        io.Fonts->AddFontFromFileTTF("../fonts/Hack-Regular.ttf", 16.0f);
+        io.Fonts->Build();
+
+        auto& style = ImGui::GetStyle();
+        style.FrameRounding = 4.0f;
+        style.WindowRounding = 0.0f;
+        style.WindowPadding = { 8.0f, 8.0f };
+        style.FramePadding = { 4.0f, 2.0f };
+        style.CellPadding = { 4.0f, 2.0f };
+        style.ItemSpacing = { 10.0f, 4.0f };
+        style.ItemInnerSpacing = { 10.0f, 4.0f };
+        style.IndentSpacing = 8.0f;
+        style.ScrollbarSize = 10.0f;
+        style.GrabMinSize = 12.0f;
+        style.WindowBorderSize = 1.0f;
+        style.FrameBorderSize = 0.0f;
+        style.PopupBorderSize = 1.0f;
+        style.WindowMenuButtonPosition = ImGuiDir_None;
+        style.WindowTitleAlign = { 0.02f, 0.5f };
+    }
+    ImGui::StyleColorsClassic();
+    ImGui_ImplGlfw_InitForOpenGL(window.handle, true);
+    ImGui_ImplOpenGL3_Init("#version 460 core");
+
     auto delta_time = 0.0f;
     auto last_time = 0.0f;
     glfwSwapInterval(0);
@@ -579,6 +626,7 @@ int main() {
     auto prev_global_transforms = global_transforms;
     auto prev_local_transforms = local_transforms;
     while (!glfwWindowShouldClose(window.handle)) {
+        glfwPollEvents();
         if (window.is_resized) {
             taa_pass.jitter = calculate_taa_jitter(glm::vec2(window.width, window.height));
             taa_pass.history = iris::framebuffer_attachment_t::create(
@@ -1118,19 +1166,87 @@ int main() {
             glPopDebugGroup();
         }
 
-        glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, -1, "copy_to_backbuffer");
+        glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, -1, "draw_ui");
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_CULL_FACE);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        fullscreen_shader.bind();
+        /*fullscreen_shader.bind();
         taa_pass.output.bind_texture(0);
         glBindVertexArray(empty_vao);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glDrawArrays(GL_TRIANGLES, 0, 3);*/
+
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+        //ImGui::ShowDemoWindow();
+        const ImGuiViewport* viewport = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(viewport->WorkPos);
+        ImGui::SetNextWindowSize(viewport->WorkSize);
+        ImGui::SetNextWindowViewport(viewport->ID);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2());
+        {
+            const auto flags =
+                ImGuiWindowFlags_NoTitleBar |
+                ImGuiWindowFlags_NoCollapse |
+                ImGuiWindowFlags_NoResize |
+                ImGuiWindowFlags_NoMove |
+                ImGuiWindowFlags_NoBringToFrontOnFocus |
+                ImGuiWindowFlags_NoNavFocus;
+            ImGui::Begin("main_dock", nullptr, flags);
+        }
+        ImGui::PopStyleVar(2);
+        ImGui::DockSpace(ImGui::GetID("main_dock"));
+
+        ImGui::SetNextWindowDockID(ImGui::GetID("main_dock"), ImGuiCond_Once);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2());
+        ImGui::Begin("Viewport", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        ImGui::SetWindowSize(ImGui::GetContentRegionAvail(), ImGuiCond_Once);
+        auto viewport_size = ImGui::GetContentRegionAvail();
+        ImGui::Image(reinterpret_cast<ImTextureID>(taa_pass.output.id()), viewport_size, ImVec2(0, 1), ImVec2(1, 0));
+        if (ImGui::IsAnyMouseDown()) {
+            viewport_size = ImGui::GetContentRegionAvail();
+        } else {
+            if (glm::any(glm::notEqual(
+                    glm::uvec2(viewport_size.x, viewport_size.y),
+                    glm::uvec2(window.width, window.height)))) {
+                window.width = viewport_size.x;
+                window.height = viewport_size.y;
+                window.is_resized = true;
+            }
+        }
+        ImGui::PopStyleVar(2);
+        ImGui::Dummy(ImVec2(0.0f, 16.0f));
+        ImGui::End();
+
+        ImGui::SetNextWindowSize(ImVec2(512, ImGui::GetContentRegionAvail().y), ImGuiCond_Once);
+        ImGui::Begin("Settings");
+        ImGui::Text("Frame Time: %.6fms", delta_time * 1000.0f);
+        if (ImGui::CollapsingHeader("Motion Vectors", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_FramePadding)) {
+            ImGui::Image(reinterpret_cast<ImTextureID>(taa_pass.velocity.id()), ImVec2(512, 512), ImVec2(0, 1), ImVec2(1, 0));
+        }
+        ImGui::Separator();
+        if (ImGui::CollapsingHeader("Shadow Maps", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_FramePadding)) {
+            ImGui::Image(reinterpret_cast<ImTextureID>(shadow_views[ui_state.cascade_index]), ImVec2(512, 512), ImVec2(0, 1), ImVec2(1, 0));
+            ImGui::SliderInt("Select Cascade: ", reinterpret_cast<int*>(&ui_state.cascade_index), 0, CASCADE_COUNT - 1);
+        }
+        ImGui::End();
+
+        ImGui::End();
+        ImGui::BeginMainMenuBar();
+        if (ImGui::BeginMenu("File")) {
+            if (ImGui::MenuItem("Exit")) {
+                glfwSetWindowShouldClose(window.handle, GLFW_TRUE);
+            }
+            ImGui::EndMenu();
+        }
+        ImGui::EndMainMenuBar();
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         glPopDebugGroup();
 
         glfwSwapBuffers(window.handle);
-        glfwPollEvents();
-
         window.update();
         camera.update(delta_time);
         prev_camera_data = camera_data;
