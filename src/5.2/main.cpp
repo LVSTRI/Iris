@@ -352,9 +352,9 @@ int main() {
     auto mesh_pool = iris::mesh_pool_t::create();
     auto models = std::vector<iris::model_t>();
     //models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/power_plant/power_plant.glb"));
-    //models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/sponza/sponza.glb"));
+    models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/sponza/sponza.glb"));
     //models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/Small_City_LVL/small_city_lvl.glb"));
-    models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/bistro/bistro.glb"));
+    //models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/bistro/bistro.glb"));
     //models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/san_miguel/san_miguel.glb"));
     //models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/cube/cube.glb"));
     //models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/deccer_cubes/deccer_cubes.glb"));

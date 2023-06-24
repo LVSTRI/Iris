@@ -281,7 +281,7 @@ int main() {
     glClipControl(GL_LOWER_LEFT, GL_ZERO_TO_ONE);
 
     auto camera = iris::camera_t::create(window);
-    auto model = iris::meshlet_model_t::create("../models/compressed/bistro/bistro.glb");
+    auto model = iris::meshlet_model_t::create("../models/compressed/sponza/sponza.glb");
 
     auto vertices = std::vector<iris::meshlet_vertex_format_t>();
     vertices.insert(vertices.end(), model.vertices().begin(), model.vertices().end());
