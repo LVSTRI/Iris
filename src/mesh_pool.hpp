@@ -72,7 +72,7 @@ namespace iris {
         // either insert a new VAO + VBO or fetch from cache
         auto& vbp = _vbps[vertex_size];
         if (!vbp.vao) {
-            vbp.allocator = allocator_t::create(256_MiB);
+            vbp.allocator = allocator_t::create(2_GiB);
 
             glCreateVertexArrays(1, &vbp.vao);
             auto offset = 0_u32;

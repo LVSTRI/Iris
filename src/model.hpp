@@ -38,7 +38,7 @@ namespace iris {
     };
 
     struct object_t {
-        mesh_t mesh = {};
+        uint32 mesh = 0;
         aabb_t aabb = {};
         glm::vec4 sphere = {};
         glm::vec3 scale = {};
@@ -66,12 +66,15 @@ namespace iris {
         auto transforms() const noexcept -> std::span<const glm::mat4>;
         auto textures() const noexcept -> std::span<const texture_t>;
 
+        auto acquire_mesh(uint32 index) const noexcept -> const mesh_t&;
+
         auto swap(self& other) noexcept -> void;
 
     private:
         std::vector<object_t> _objects;
         std::vector<glm::mat4> _transforms;
         std::vector<texture_t> _textures;
+        std::vector<mesh_t> _meshes;
     };
 
     struct meshlet_t {

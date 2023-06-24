@@ -5,6 +5,7 @@
 #include <iostream>
 #include <cstdint>
 #include <fstream>
+#include <cassert>
 #include <random>
 #include <string>
 
@@ -37,10 +38,21 @@ namespace iris {
     #define iris_concat_impl(a, b) a##b
     #define iris_concat(a, b) iris_concat_impl(a, b)
     #define iris_defer(f) auto iris_concat(__defer_func_, __LINE__) = iris::defer_t(f)
+#if defined(NDEBUG)
+    #define iris_assert(x) ((void)(x))
+#else
+    #define iris_assert(x) assert(x)
+#endif
+    #define iris_ffx_assert(x) iris_assert((x) == FFX_OK)
 
     template <typename... Args>
     auto log(Args&&... args) noexcept -> void {
         (std::cout << ... << args) << '\n';
+    }
+
+    inline auto hash_combine(uint64 seed, uint64 value) noexcept -> uint64 {
+        seed ^= value + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        return seed;
     }
 
     inline auto whole_file(const fs::path& path) noexcept -> std::string {

@@ -135,30 +135,6 @@ struct indirect_group_t {
     iris::uint32 model_index = 0;
 };
 
-static auto group_indirect_commands(std::span<const iris::model_t> models) noexcept
-    -> std::unordered_map<iris::uint64, indirect_group_t> {
-    auto groups = std::unordered_map<iris::uint64, indirect_group_t>();
-    auto model_index = 0_u32;
-    for (const auto& model : models) {
-        for (const auto& object : model.objects()) {
-            auto hash = 0_u64;
-            hash = hash_combine(hash, object.mesh.vao);
-            hash = hash_combine(hash, object.mesh.vbo);
-            hash = hash_combine(hash, object.mesh.ebo);
-            hash = hash_combine(hash, object.mesh.vertex_slice.index());
-            hash = hash_combine(hash, object.mesh.index_slice.index());
-            groups[hash].objects.push_back(std::cref(object));
-            groups[hash].vao = object.mesh.vao;
-            groups[hash].vbo = object.mesh.vbo;
-            groups[hash].ebo = object.mesh.ebo;
-            groups[hash].vertex_size = object.mesh.vertex_size;
-            groups[hash].model_index = model_index;
-        }
-        model_index++;
-    }
-    return groups;
-}
-
 static auto calculate_global_projection(const iris::camera_t& camera, const glm::vec3 light_dir) noexcept -> glm::mat4 {
     const auto ndc_cube = std::to_array({
         glm::vec3(-1.0f, -1.0f, -1.0f),

@@ -91,8 +91,17 @@ add_library(Iris STATIC
     src/mesh_pool.hpp)
 
 target_compile_definitions(Iris PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
-target_link_libraries(Iris PUBLIC glad glfw glm cgltf stb meshoptimizer ktx imgui)
-target_include_directories(Iris PUBLIC src)
+target_link_libraries(Iris PUBLIC
+    glad
+    glfw
+    glm
+    cgltf
+    stb
+    meshoptimizer
+    ktx
+    imgui)
+target_include_directories(Iris PUBLIC
+    src)
 if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")
     target_compile_options(Iris PRIVATE -march=native -mavx2 -Wall -Wextra -Wpedantic -Wno-language-extension-token)
 endif()

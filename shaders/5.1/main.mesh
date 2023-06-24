@@ -19,7 +19,7 @@ struct vertex_format_t {
 
 layout (local_size_x = 32) in;
 
-layout (triangles, max_vertices = 32, max_primitives = 124) out;
+layout (triangles, max_vertices = 64, max_primitives = 126) out;
 
 layout (location = 0) out t_per_vertex {
     flat uint meshlet_id;
@@ -56,11 +56,14 @@ void main() {
 
     if (thread_index < meshlet.index_count) {
         const mat4 transform = transforms[meshlet.mesh_index];
-        const vertex_format_t vertex = vertices[meshlet.vertex_offset + indices[meshlet.index_offset + thread_index]];
-        gl_MeshVerticesNV[thread_index].gl_Position = pv * transform * vec4(vertex.position.xyz, 1.0);
-        o_per_vertex[thread_index].meshlet_id = workgroup_index;
-        o_per_vertex[thread_index].mesh_id = meshlet.mesh_index;
-        o_per_vertex[thread_index].uv = vertex.uv.xy;
+        for (uint i = 0; i < 2; ++i) {
+            const uint cur_index = thread_index * 2 + i;
+            const vertex_format_t vertex = vertices[meshlet.vertex_offset + indices[meshlet.index_offset + cur_index]];
+            gl_MeshVerticesNV[cur_index].gl_Position = pv * transform * vec4(vertex.position.xyz, 1.0);
+            o_per_vertex[cur_index].meshlet_id = workgroup_index;
+            o_per_vertex[cur_index].mesh_id = meshlet.mesh_index;
+            o_per_vertex[cur_index].uv = vertex.uv.xy;
+        }
     }
 
     if (thread_index == 0) {

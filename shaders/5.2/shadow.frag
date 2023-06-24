@@ -11,7 +11,7 @@ layout (std430, binding = 5) readonly restrict buffer b_textures {
 };
 
 void main() {
-    /*if (i_diffuse_texture != -1 && texture(textures[i_diffuse_texture], i_uv).a < 0.5) {
+    if (i_diffuse_texture != -1 && texture(textures[i_diffuse_texture], i_uv).a < 0.5) {
         discard;
-    }*/
+    }
 }

@@ -129,11 +129,6 @@ struct cull_input_package_t {
     std::reference_wrapper<iris::buffer_t> shift;
 };
 
-static auto hash_combine(iris::uint64 seed, iris::uint64 value) noexcept -> iris::uint64 {
-    seed ^= value + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-    return seed;
-}
-
 struct indirect_group_t {
     std::vector<std::reference_wrapper<const iris::object_t>> objects;
     iris::uint32 vao = 0;
@@ -146,36 +141,38 @@ struct indirect_group_t {
 struct taa_pass_t {
     iris::framebuffer_attachment_t history;
     iris::framebuffer_attachment_t velocity;
-
     iris::framebuffer_attachment_t output;
-    iris::framebuffer_t output_fbo;
 
-    std::array<glm::vec2, 16> jitter;
+    iris::framebuffer_t output_fbo;
 
     iris::uint32 frames = 0;
 };
 
 struct ui_state_t {
     iris::uint32 cascade_index = 0;
+    iris::float32 sun_size = 4.0f;
+    iris::float32 sun_pitch = 1.404f;
+    iris::float32 sun_heading = 4.474f;
 };
 
-static auto group_indirect_commands(std::span<const iris::model_t> models) noexcept
+static auto group_indirect_commands(const std::vector<iris::model_t>& models) noexcept
     -> std::unordered_map<iris::uint64, indirect_group_t> {
     auto groups = std::unordered_map<iris::uint64, indirect_group_t>();
     auto model_index = 0_u32;
     for (const auto& model : models) {
         for (const auto& object : model.objects()) {
+            const auto& mesh = model.acquire_mesh(object.mesh);
             auto hash = 0_u64;
-            hash = hash_combine(hash, object.mesh.vao);
-            hash = hash_combine(hash, object.mesh.vbo);
-            hash = hash_combine(hash, object.mesh.ebo);
-            hash = hash_combine(hash, object.mesh.vertex_slice.index());
-            hash = hash_combine(hash, object.mesh.index_slice.index());
+            hash = iris::hash_combine(hash, mesh.vao);
+            hash = iris::hash_combine(hash, mesh.vbo);
+            hash = iris::hash_combine(hash, mesh.ebo);
+            hash = iris::hash_combine(hash, mesh.vertex_slice.index());
+            hash = iris::hash_combine(hash, mesh.index_slice.index());
             groups[hash].objects.push_back(std::cref(object));
-            groups[hash].vao = object.mesh.vao;
-            groups[hash].vbo = object.mesh.vbo;
-            groups[hash].ebo = object.mesh.ebo;
-            groups[hash].vertex_size = object.mesh.vertex_size;
+            groups[hash].vao = mesh.vao;
+            groups[hash].vbo = mesh.vbo;
+            groups[hash].ebo = mesh.ebo;
+            groups[hash].vertex_size = mesh.vertex_size;
             groups[hash].model_index = model_index;
         }
         model_index++;
@@ -246,27 +243,6 @@ static auto calculate_wg_from_resolution(iris::uint32 width, iris::uint32 height
     return wg_count;
 }
 
-static auto calculate_taa_jitter(glm::vec2 resolution) noexcept -> std::array<glm::vec2, 16> {
-    return std::to_array({
-        ((glm::vec2(0.500000f, 0.333333f) - 0.5f) / resolution) * 2.0f,
-        ((glm::vec2(0.250000f, 0.666667f) - 0.5f) / resolution) * 2.0f,
-        ((glm::vec2(0.750000f, 0.111111f) - 0.5f) / resolution) * 2.0f,
-        ((glm::vec2(0.125000f, 0.444444f) - 0.5f) / resolution) * 2.0f,
-        ((glm::vec2(0.625000f, 0.777778f) - 0.5f) / resolution) * 2.0f,
-        ((glm::vec2(0.375000f, 0.222222f) - 0.5f) / resolution) * 2.0f,
-        ((glm::vec2(0.875000f, 0.555556f) - 0.5f) / resolution) * 2.0f,
-        ((glm::vec2(0.062500f, 0.888889f) - 0.5f) / resolution) * 2.0f,
-        ((glm::vec2(0.562500f, 0.037037f) - 0.5f) / resolution) * 2.0f,
-        ((glm::vec2(0.312500f, 0.370370f) - 0.5f) / resolution) * 2.0f,
-        ((glm::vec2(0.812500f, 0.703704f) - 0.5f) / resolution) * 2.0f,
-        ((glm::vec2(0.187500f, 0.148148f) - 0.5f) / resolution) * 2.0f,
-        ((glm::vec2(0.687500f, 0.481481f) - 0.5f) / resolution) * 2.0f,
-        ((glm::vec2(0.437500f, 0.814815f) - 0.5f) / resolution) * 2.0f,
-        ((glm::vec2(0.937500f, 0.259259f) - 0.5f) / resolution) * 2.0f,
-        ((glm::vec2(0.031250f, 0.592593f) - 0.5f) / resolution) * 2.0f,
-    });
-}
-
 int main() {
     if (!glfwInit()) {
         return -1;
@@ -299,13 +275,15 @@ int main() {
 
 #if !defined(NDEBUG)
     glEnable(GL_DEBUG_OUTPUT);
-    glDebugMessageCallback([] (GLenum source,
-                               GLenum type,
-                               GLuint id,
-                               GLenum severity,
-                               GLsizei length,
-                               const GLchar* message,
-                               const void*) {
+    glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+    glDebugMessageCallback([] (
+            GLenum source,
+            GLenum type,
+            GLuint id,
+            GLenum severity,
+            GLsizei length,
+            const GLchar* message,
+            const void*) {
         if (severity == GL_DEBUG_SEVERITY_NOTIFICATION) {
             return;
         }
@@ -344,7 +322,7 @@ int main() {
         window.cursor_position = {};
     });
 
-    glEnable(GL_FRAMEBUFFER_SRGB);
+    //glEnable(GL_FRAMEBUFFER_SRGB);
     glEnable(GL_REPRESENTATIVE_FRAGMENT_TEST_NV);
     glClipControl(GL_LOWER_LEFT, GL_ZERO_TO_ONE);
 
@@ -352,6 +330,7 @@ int main() {
     glFrontFace(GL_CCW);
 
     auto main_shader = iris::shader_t::create("../shaders/5.2/main.vert", "../shaders/5.2/main.frag");
+    auto atmosphere_shader = iris::shader_t::create("../shaders/5.2/atmosphere.vert", "../shaders/5.2/atmosphere.frag");
     auto depth_only_shader = iris::shader_t::create("../shaders/5.2/depth_only.vert", "../shaders/5.2/depth_only.frag");
     auto depth_reduce_init_shader = iris::shader_t::create_compute("../shaders/5.2/depth_reduce_init.comp");
     auto depth_reduce_shader = iris::shader_t::create_compute("../shaders/5.2/depth_reduce.comp");
@@ -374,6 +353,7 @@ int main() {
     auto models = std::vector<iris::model_t>();
     //models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/power_plant/power_plant.glb"));
     //models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/sponza/sponza.glb"));
+    //models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/Small_City_LVL/small_city_lvl.glb"));
     models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/bistro/bistro.glb"));
     //models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/san_miguel/san_miguel.glb"));
     //models.emplace_back(iris::model_t::create(mesh_pool, "../models/compressed/cube/cube.glb"));
@@ -447,30 +427,30 @@ int main() {
 
     auto camera_buffer = iris::buffer_t::create(sizeof(camera_data_t), GL_UNIFORM_BUFFER);
     auto frustum_buffer = iris::buffer_t::create(sizeof(iris::frustum_t[32]), GL_SHADER_STORAGE_BUFFER);
-    auto local_transform_buffer = iris::buffer_t::create(sizeof(glm::mat4[16384]), GL_SHADER_STORAGE_BUFFER);
-    auto global_transform_buffer = iris::buffer_t::create(sizeof(glm::mat4[16384]), GL_SHADER_STORAGE_BUFFER);
-    auto object_info_buffer = iris::buffer_t::create(sizeof(object_info_t[16384]), GL_SHADER_STORAGE_BUFFER);
+    auto local_transform_buffer = iris::buffer_t::create(sizeof(glm::mat4[163840]), GL_SHADER_STORAGE_BUFFER);
+    auto global_transform_buffer = iris::buffer_t::create(sizeof(glm::mat4[163840]), GL_SHADER_STORAGE_BUFFER);
+    auto object_info_buffer = iris::buffer_t::create(sizeof(object_info_t[163840]), GL_SHADER_STORAGE_BUFFER);
     auto texture_buffer = iris::buffer_t::create(sizeof(iris::uint64[4096]), GL_SHADER_STORAGE_BUFFER);
     auto cascade_setup_buffer = iris::buffer_t::create(sizeof(cascade_setup_data_t), GL_UNIFORM_BUFFER);
-    auto directional_lights_buffer = iris::buffer_t::create(sizeof(directional_light_t[16]), GL_UNIFORM_BUFFER);
+    auto directional_lights_buffer = iris::buffer_t::create(sizeof(directional_light_t[4]), GL_UNIFORM_BUFFER);
     auto cascade_buffer = iris::buffer_t::create(sizeof(cascade_data_t[CASCADE_COUNT]), GL_SHADER_STORAGE_BUFFER, GL_NONE);
 
     auto prev_camera_buffer = iris::buffer_t::create(sizeof(camera_data_t), GL_UNIFORM_BUFFER);
-    auto prev_local_transform_buffer = iris::buffer_t::create(sizeof(glm::mat4[16384]), GL_SHADER_STORAGE_BUFFER);
-    auto prev_global_transform_buffer = iris::buffer_t::create(sizeof(glm::mat4[16384]), GL_SHADER_STORAGE_BUFFER);
+    auto prev_local_transform_buffer = iris::buffer_t::create(sizeof(glm::mat4[163840]), GL_SHADER_STORAGE_BUFFER);
+    auto prev_global_transform_buffer = iris::buffer_t::create(sizeof(glm::mat4[163840]), GL_SHADER_STORAGE_BUFFER);
 
     // cull output
-    auto main_indirect_buffer = iris::buffer_t::create(sizeof(draw_elements_indirect_t[16384]), GL_DRAW_INDIRECT_BUFFER);
+    auto main_indirect_buffer = iris::buffer_t::create(sizeof(draw_elements_indirect_t[163840]), GL_DRAW_INDIRECT_BUFFER);
     auto main_count_buffer = iris::buffer_t::create(sizeof(iris::uint64[1024]), GL_PARAMETER_BUFFER, GL_DYNAMIC_STORAGE_BIT);
-    auto main_object_shift_buffer = iris::buffer_t::create(sizeof(iris::uint64[16384]), GL_SHADER_STORAGE_BUFFER, GL_NONE);
+    auto main_object_shift_buffer = iris::buffer_t::create(sizeof(iris::uint64[163840]), GL_SHADER_STORAGE_BUFFER, GL_NONE);
 
-    auto shadow_indirect_buffer = iris::buffer_t::create(sizeof(draw_elements_indirect_t[16384]), GL_DRAW_INDIRECT_BUFFER, GL_NONE);
+    auto shadow_indirect_buffer = iris::buffer_t::create(sizeof(draw_elements_indirect_t[163840]), GL_DRAW_INDIRECT_BUFFER, GL_NONE);
     auto shadow_count_buffer = iris::buffer_t::create(sizeof(iris::uint64[1024]), GL_PARAMETER_BUFFER, GL_NONE);
-    auto shadow_object_shift_buffer = iris::buffer_t::create(sizeof(iris::uint64[16384]), GL_SHADER_STORAGE_BUFFER, GL_NONE);
+    auto shadow_object_shift_buffer = iris::buffer_t::create(sizeof(iris::uint64[163840]), GL_SHADER_STORAGE_BUFFER, GL_NONE);
 
     auto roc_indirect_buffer = iris::buffer_t::create(sizeof(draw_arrays_indirect_t), GL_DRAW_INDIRECT_BUFFER, GL_DYNAMIC_STORAGE_BIT);
-    auto roc_object_shift_buffer = iris::buffer_t::create(sizeof(iris::uint64[16384]), GL_SHADER_STORAGE_BUFFER, GL_NONE);
-    auto roc_visibility_buffer = iris::buffer_t::create(sizeof(iris::uint64[16384]), GL_SHADER_STORAGE_BUFFER, GL_NONE);
+    auto roc_object_shift_buffer = iris::buffer_t::create(sizeof(iris::uint64[163840]), GL_SHADER_STORAGE_BUFFER, GL_NONE);
+    auto roc_visibility_buffer = iris::buffer_t::create(sizeof(iris::uint64[163840]), GL_SHADER_STORAGE_BUFFER, GL_NONE);
 
     // DEBUG
     auto debug_aabb_indirect_buffer = iris::buffer_t::create(sizeof(draw_arrays_indirect_t), GL_DRAW_INDIRECT_BUFFER, GL_DYNAMIC_STORAGE_BIT);
@@ -480,7 +460,7 @@ int main() {
         window.width,
         window.height,
         1,
-        GL_SRGB8_ALPHA8,
+        GL_RGBA8,
         GL_RGBA,
         GL_UNSIGNED_BYTE,
         false,
@@ -498,21 +478,20 @@ int main() {
         window.width,
         window.height,
         1,
-        GL_SRGB8_ALPHA8,
+        GL_RGBA8,
         GL_RGBA,
         GL_UNSIGNED_BYTE,
         false);
     taa_pass.output_fbo = iris::framebuffer_t::create({
         std::cref(taa_pass.output)
     });
-    taa_pass.jitter = calculate_taa_jitter(glm::vec2(window.width, window.height));
 
     auto offscreen_attachment = std::vector<iris::framebuffer_attachment_t>(2);
     offscreen_attachment[0] = iris::framebuffer_attachment_t::create(
         window.width,
         window.height,
         1,
-        GL_SRGB8_ALPHA8,
+        GL_RGBA8,
         GL_RGBA,
         GL_UNSIGNED_BYTE,
         true,
@@ -588,6 +567,7 @@ int main() {
         io.Fonts->AddFontFromFileTTF("../fonts/Hack-Regular.ttf", 16.0f);
         io.Fonts->Build();
 
+        ImGui::StyleColorsClassic();
         auto& style = ImGui::GetStyle();
         style.FrameRounding = 4.0f;
         style.WindowRounding = 0.0f;
@@ -604,8 +584,63 @@ int main() {
         style.PopupBorderSize = 1.0f;
         style.WindowMenuButtonPosition = ImGuiDir_None;
         style.WindowTitleAlign = { 0.02f, 0.5f };
+
+        style.Colors[ImGuiCol_Text] = ImVec4(0.75f, 0.75f, 0.75f, 1.00f);
+        style.Colors[ImGuiCol_TextDisabled] = ImVec4(0.35f, 0.35f, 0.35f, 1.00f);
+        style.Colors[ImGuiCol_WindowBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.94f);
+        style.Colors[ImGuiCol_ChildBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+        style.Colors[ImGuiCol_PopupBg] = ImVec4(0.08f, 0.08f, 0.08f, 0.94f);
+        style.Colors[ImGuiCol_Border] = ImVec4(0.00f, 0.00f, 0.00f, 0.50f);
+        style.Colors[ImGuiCol_BorderShadow] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+        style.Colors[ImGuiCol_FrameBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.54f);
+        style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.37f, 0.14f, 0.14f, 0.67f);
+        style.Colors[ImGuiCol_FrameBgActive] = ImVec4(0.39f, 0.20f, 0.20f, 0.67f);
+        style.Colors[ImGuiCol_TitleBg] = ImVec4(0.04f, 0.04f, 0.04f, 1.00f);
+        style.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.48f, 0.16f, 0.16f, 1.00f);
+        style.Colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.48f, 0.16f, 0.16f, 1.00f);
+        style.Colors[ImGuiCol_MenuBarBg] = ImVec4(0.14f, 0.14f, 0.14f, 1.00f);
+        style.Colors[ImGuiCol_ScrollbarBg] = ImVec4(0.02f, 0.02f, 0.02f, 0.53f);
+        style.Colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.31f, 0.31f, 0.31f, 1.00f);
+        style.Colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.41f, 0.41f, 0.41f, 1.00f);
+        style.Colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.51f, 0.51f, 0.51f, 1.00f);
+        style.Colors[ImGuiCol_CheckMark] = ImVec4(0.56f, 0.10f, 0.10f, 1.00f);
+        style.Colors[ImGuiCol_SliderGrab] = ImVec4(1.00f, 0.19f, 0.19f, 0.40f);
+        style.Colors[ImGuiCol_SliderGrabActive] = ImVec4(0.89f, 0.00f, 0.19f, 1.00f);
+        style.Colors[ImGuiCol_Button] = ImVec4(1.00f, 0.19f, 0.19f, 0.40f);
+        style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.80f, 0.17f, 0.00f, 1.00f);
+        style.Colors[ImGuiCol_ButtonActive] = ImVec4(0.89f, 0.00f, 0.19f, 1.00f);
+        style.Colors[ImGuiCol_Header] = ImVec4(0.33f, 0.35f, 0.36f, 0.53f);
+        style.Colors[ImGuiCol_HeaderHovered] = ImVec4(0.76f, 0.28f, 0.44f, 0.67f);
+        style.Colors[ImGuiCol_HeaderActive] = ImVec4(0.47f, 0.47f, 0.47f, 0.67f);
+        style.Colors[ImGuiCol_Separator] = ImVec4(0.32f, 0.32f, 0.32f, 1.00f);
+        style.Colors[ImGuiCol_SeparatorHovered] = ImVec4(0.32f, 0.32f, 0.32f, 1.00f);
+        style.Colors[ImGuiCol_SeparatorActive] = ImVec4(0.32f, 0.32f, 0.32f, 1.00f);
+        style.Colors[ImGuiCol_ResizeGrip] = ImVec4(1.00f, 1.00f, 1.00f, 0.85f);
+        style.Colors[ImGuiCol_ResizeGripHovered] = ImVec4(1.00f, 1.00f, 1.00f, 0.60f);
+        style.Colors[ImGuiCol_ResizeGripActive] = ImVec4(1.00f, 1.00f, 1.00f, 0.90f);
+        style.Colors[ImGuiCol_Tab] = ImVec4(0.07f, 0.07f, 0.07f, 0.51f);
+        style.Colors[ImGuiCol_TabHovered] = ImVec4(0.86f, 0.23f, 0.43f, 0.67f);
+        style.Colors[ImGuiCol_TabActive] = ImVec4(0.19f, 0.19f, 0.19f, 0.57f);
+        style.Colors[ImGuiCol_TabUnfocused] = ImVec4(0.05f, 0.05f, 0.05f, 0.90f);
+        style.Colors[ImGuiCol_TabUnfocusedActive] = ImVec4(0.13f, 0.13f, 0.13f, 0.74f);
+        style.Colors[ImGuiCol_DockingPreview] = ImVec4(0.47f, 0.47f, 0.47f, 0.47f);
+        style.Colors[ImGuiCol_DockingEmptyBg] = ImVec4(0.20f, 0.20f, 0.20f, 1.00f);
+        style.Colors[ImGuiCol_PlotLines] = ImVec4(0.61f, 0.61f, 0.61f, 1.00f);
+        style.Colors[ImGuiCol_PlotLinesHovered] = ImVec4(1.00f, 0.43f, 0.35f, 1.00f);
+        style.Colors[ImGuiCol_PlotHistogram] = ImVec4(0.90f, 0.70f, 0.00f, 1.00f);
+        style.Colors[ImGuiCol_PlotHistogramHovered] = ImVec4(1.00f, 0.60f, 0.00f, 1.00f);
+        style.Colors[ImGuiCol_TableHeaderBg] = ImVec4(0.19f, 0.19f, 0.20f, 1.00f);
+        style.Colors[ImGuiCol_TableBorderStrong] = ImVec4(0.31f, 0.31f, 0.35f, 1.00f);
+        style.Colors[ImGuiCol_TableBorderLight] = ImVec4(0.23f, 0.23f, 0.25f, 1.00f);
+        style.Colors[ImGuiCol_TableRowBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+        style.Colors[ImGuiCol_TableRowBgAlt] = ImVec4(1.00f, 1.00f, 1.00f, 0.07f);
+        style.Colors[ImGuiCol_TextSelectedBg] = ImVec4(0.26f, 0.59f, 0.98f, 0.35f);
+        style.Colors[ImGuiCol_DragDropTarget] = ImVec4(1.00f, 1.00f, 0.00f, 0.90f);
+        style.Colors[ImGuiCol_NavHighlight] = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
+        style.Colors[ImGuiCol_NavWindowingHighlight] = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
+        style.Colors[ImGuiCol_NavWindowingDimBg] = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
+        style.Colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.80f, 0.80f, 0.80f, 0.35f);
     }
-    ImGui::StyleColorsClassic();
     ImGui_ImplGlfw_InitForOpenGL(window.handle, true);
     ImGui_ImplOpenGL3_Init("#version 460 core");
 
@@ -625,15 +660,17 @@ int main() {
     };
     auto prev_global_transforms = global_transforms;
     auto prev_local_transforms = local_transforms;
+    auto sun_angular_measure = 0.0f;
+    auto sun_pitch_inv = false;
     while (!glfwWindowShouldClose(window.handle)) {
         glfwPollEvents();
         if (window.is_resized) {
-            taa_pass.jitter = calculate_taa_jitter(glm::vec2(window.width, window.height));
+            glFinish();
             taa_pass.history = iris::framebuffer_attachment_t::create(
                 window.width,
                 window.height,
                 1,
-                GL_SRGB8_ALPHA8,
+                GL_RGBA8,
                 GL_RGBA,
                 GL_UNSIGNED_BYTE,
                 false,
@@ -647,24 +684,13 @@ int main() {
                 GL_FLOAT,
                 true,
                 false);
-            taa_pass.output = iris::framebuffer_attachment_t::create(
-                window.width,
-                window.height,
-                1,
-                GL_SRGB8_ALPHA8,
-                GL_RGBA,
-                GL_UNSIGNED_BYTE,
-                false);
-            taa_pass.output_fbo = iris::framebuffer_t::create({
-                std::cref(taa_pass.output)
-            });
-            taa_pass.frames = -2;
+            taa_pass.frames = 0;
 
             offscreen_attachment[0] = iris::framebuffer_attachment_t::create(
                 window.width,
                 window.height,
                 1,
-                GL_SRGB8_ALPHA8,
+                GL_RGBA8,
                 GL_RGBA,
                 GL_UNSIGNED_BYTE,
                 false,
@@ -688,6 +714,15 @@ int main() {
                 GL_COLOR_ATTACHMENT1
             }).data());
 
+            taa_pass.output = iris::framebuffer_attachment_t::create(
+                window.width,
+                window.height,
+                1,
+                GL_RGBA8,
+                GL_RGBA,
+                GL_UNSIGNED_BYTE,
+                false);
+
             depth_only_fbo = iris::framebuffer_t::create({
                 std::cref(offscreen_attachment[1])
             });
@@ -703,6 +738,11 @@ int main() {
                     GL_RG,
                     GL_FLOAT));
             }
+
+            taa_pass.output_fbo = iris::framebuffer_t::create({
+                std::cref(taa_pass.output)
+            });
+
             window.is_resized = false;
         }
         if (glfwGetKey(window.handle, GLFW_KEY_H) == GLFW_PRESS) {
@@ -719,10 +759,29 @@ int main() {
         }
         last_key_c = key_c_pressed;
 
-        /*directional_lights[0].direction = glm::normalize(glm::vec3(
-            0.33f * glm::cos(current_time * 0.5f),
-            1.0f,
-            0.33f * glm::sin(current_time * 0.5f)));*/
+        /*if (sun_pitch_inv) {
+            ui_state.sun_pitch -= delta_time * 0.097f;
+        } else {
+            ui_state.sun_pitch += delta_time * 0.097f;
+        }
+        ui_state.sun_heading += delta_time * 0.095f;
+        if (ui_state.sun_pitch > 1.1f) {
+            sun_pitch_inv = true;
+        }
+        if (ui_state.sun_pitch <= 0.0f) {
+            ui_state.sun_heading = 0;
+            ui_state.sun_pitch = 0;
+            sun_pitch_inv = false;
+        }
+        if (ui_state.sun_heading > glm::pi<iris::float32>()) {
+            ui_state.sun_heading = 0;
+            ui_state.sun_pitch = 0;
+            sun_pitch_inv = false;
+        }*/
+        directional_lights[0].direction = glm::normalize(glm::vec3(
+            glm::cos(ui_state.sun_pitch) * glm::sin(ui_state.sun_heading),
+            glm::sin(ui_state.sun_pitch),
+            glm::cos(ui_state.sun_pitch) * glm::cos(ui_state.sun_heading)));
 
         auto object_infos = std::vector<object_info_t>();
         object_infos.reserve(objects.size());
@@ -738,11 +797,12 @@ int main() {
                         texture_offset += models[i].textures().size();
                     }
                     auto& u_object = object.get();
+                    const auto& mesh = models[group.model_index].acquire_mesh(u_object.mesh);
                     auto command = draw_elements_indirect_t {
-                        static_cast<iris::uint32>(u_object.mesh.index_count),
+                        static_cast<iris::uint32>(mesh.index_count),
                         1,
-                        static_cast<iris::uint32>(u_object.mesh.index_offset),
-                        static_cast<iris::int32>(u_object.mesh.vertex_offset),
+                        static_cast<iris::uint32>(mesh.index_offset),
+                        static_cast<iris::int32>(mesh.vertex_offset),
                         0
                     };
                     object_infos.push_back({
@@ -918,11 +978,12 @@ int main() {
             glPopDebugGroup();
         }
 
+        const auto n_jitter = glm::vec2(0.0f);
         depth_only_fbo.clear_depth(1.0f);
         depth_only_fbo.bind();
         depth_only_shader
             .bind()
-            .set(1, taa_pass.jitter[taa_pass.frames % 16]);
+            .set(1, n_jitter);
         camera_buffer.bind_base(0);
         local_transform_buffer.bind_range(1, 0, iris::size_bytes(local_transforms));
         global_transform_buffer.bind_range(2, 0, iris::size_bytes(global_transforms));
@@ -1038,12 +1099,30 @@ int main() {
 
         offscreen_fbo.bind();
         offscreen_fbo.clear_color(0, { 0_u32, 0_u32, 0_u32, 255_u32 });
-        offscreen_fbo.clear_color(1, { 0_u32, 0_u32, 0_u32, 255_u32 });
         frustum_buffer.bind_range(0, 0, iris::size_bytes(camera_frustum));
 
+        glDisable(GL_DEPTH_TEST);
+        atmosphere_shader
+            .bind()
+            .set(0, glm::vec2(window.width, window.height))
+            .set(1, { sun_angular_measure });
+        camera_buffer.bind_base(0);
+        directional_lights_buffer.bind_range(1, 0, iris::size_bytes(directional_lights));
+        glBindVertexArray(empty_vao);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+
+        auto max_samplers = 0_i32;
+        glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &max_samplers);
+        for (auto i = 0_u32; i < max_samplers; ++i) {
+            glBindSampler(i, 0);
+        }
+        glEnable(GL_DEPTH_TEST);
+        offscreen_fbo.bind();
+        offscreen_fbo.clear_color(1, { 0_u32, 0_u32, 0_u32, 255_u32 });
+        glDepthFunc(GL_EQUAL);
         main_shader
             .bind()
-            .set(1, taa_pass.jitter[taa_pass.frames % 16])
+            .set(1, n_jitter)
             .set(4, glm::vec2(window.width, window.height));
         camera_buffer.bind_base(0);
         local_transform_buffer.bind_range(1, 0, iris::size_bytes(local_transforms));
@@ -1086,48 +1165,11 @@ int main() {
         }
         glPopDebugGroup();
 
-        glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, -1, "taa_resolve_pass");
-        glDisable(GL_DEPTH_TEST);
-        if (taa_pass.frames > 0) {
-            taa_resolve_shader
-                .bind()
-                .set(0, { 0_i32 })
-                .set(1, { 1_i32 })
-                .set(2, { 2_i32 });
-            offscreen_attachment[0].bind_texture(0);
-            taa_pass.history.bind_texture(1);
-            taa_pass.velocity.bind_texture(2);
-            taa_pass.output_fbo.bind();
-            glBindVertexArray(empty_vao);
-            glDrawArrays(GL_TRIANGLES, 0, 3);
-            glCopyImageSubData(
-                taa_pass.output.id(),
-                GL_TEXTURE_2D,
-                0, 0, 0, 0,
-                taa_pass.history.id(),
-                GL_TEXTURE_2D,
-                0, 0, 0, 0,
-                window.width, window.height, 1);
-        } else {
-            glCopyImageSubData(
-                offscreen_attachment[0].id(),
-                GL_TEXTURE_2D,
-                0, 0, 0, 0,
-                taa_pass.history.id(),
-                GL_TEXTURE_2D,
-                0, 0, 0, 0,
-                window.width, window.height, 1);
-            glCopyImageSubData(
-                offscreen_attachment[0].id(),
-                GL_TEXTURE_2D,
-                0, 0, 0, 0,
-                taa_pass.output.id(),
-                GL_TEXTURE_2D,
-                0, 0, 0, 0,
-                window.width, window.height, 1);
-        }
+        glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, -1, "fsr_pass");
         glPopDebugGroup();
 
+        glDisable(GL_DEPTH_TEST);
+        offscreen_fbo.bind();
         if (glfwGetKey(window.handle, GLFW_KEY_F) == GLFW_PRESS) {
             glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, -1, "debug_aabbs");
             glDisable(GL_CULL_FACE);
@@ -1170,10 +1212,6 @@ int main() {
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_CULL_FACE);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        /*fullscreen_shader.bind();
-        taa_pass.output.bind_texture(0);
-        glBindVertexArray(empty_vao);
-        glDrawArrays(GL_TRIANGLES, 0, 3);*/
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
@@ -1204,7 +1242,7 @@ int main() {
         ImGui::Begin("Viewport", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         ImGui::SetWindowSize(ImGui::GetContentRegionAvail(), ImGuiCond_Once);
         auto viewport_size = ImGui::GetContentRegionAvail();
-        ImGui::Image(reinterpret_cast<ImTextureID>(taa_pass.output.id()), viewport_size, ImVec2(0, 1), ImVec2(1, 0));
+        ImGui::Image(reinterpret_cast<ImTextureID>(offscreen_attachment[0].id()), viewport_size, ImVec2(0, 1), ImVec2(1, 0));
         if (ImGui::IsAnyMouseDown()) {
             viewport_size = ImGui::GetContentRegionAvail();
         } else {
@@ -1222,14 +1260,43 @@ int main() {
 
         ImGui::SetNextWindowSize(ImVec2(512, ImGui::GetContentRegionAvail().y), ImGuiCond_Once);
         ImGui::Begin("Settings");
-        ImGui::Text("Frame Time: %.6fms", delta_time * 1000.0f);
-        if (ImGui::CollapsingHeader("Motion Vectors", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_FramePadding)) {
-            ImGui::Image(reinterpret_cast<ImTextureID>(taa_pass.velocity.id()), ImVec2(512, 512), ImVec2(0, 1), ImVec2(1, 0));
+        {
+            ImGui::Text("Frame Time: %.6fms", delta_time * 1000.0f);
+            ImGui::Separator();
+
+            ImGui::Text("Sun Size:");
+            ImGui::SameLine();
+            ImGui::PushID("sun_size");
+            ImGui::SliderFloat("", &ui_state.sun_size, 0.0f, 100.0f);
+            ImGui::PopID();
+
+            ImGui::Text("Sun Pitch:");
+            ImGui::SameLine();
+            ImGui::PushID("sun_pitch");
+            ImGui::SliderFloat("", &ui_state.sun_pitch, 0.0f, glm::half_pi<iris::float32>());
+            ImGui::PopID();
+
+            ImGui::Text("Sun Heading:");
+            ImGui::SameLine();
+            ImGui::PushID("sun_heading");
+            ImGui::SliderFloat("", &ui_state.sun_heading, 0.0f, glm::two_pi<iris::float32>());
+            ImGui::PopID();
         }
+
+
+        sun_angular_measure = glm::pi<iris::float32>() + (ui_state.sun_size / 100.0f);
         ImGui::Separator();
         if (ImGui::CollapsingHeader("Shadow Maps", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_FramePadding)) {
             ImGui::Image(reinterpret_cast<ImTextureID>(shadow_views[ui_state.cascade_index]), ImVec2(512, 512), ImVec2(0, 1), ImVec2(1, 0));
-            ImGui::SliderInt("Select Cascade: ", reinterpret_cast<int*>(&ui_state.cascade_index), 0, CASCADE_COUNT - 1);
+
+            ImGui::Text("Select Cascade: ");
+            ImGui::SameLine();
+            ImGui::PushID("select_cascade");
+            ImGui::SliderInt("", reinterpret_cast<int*>(&ui_state.cascade_index), 0, CASCADE_COUNT - 1);
+            ImGui::PopID();
+        }
+        if (ImGui::CollapsingHeader("Motion Vectors", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_FramePadding)) {
+            ImGui::Image(reinterpret_cast<ImTextureID>(taa_pass.velocity.id()), ImVec2(512, 512), ImVec2(0, 1), ImVec2(1, 0));
         }
         ImGui::End();
 

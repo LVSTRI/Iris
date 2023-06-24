@@ -69,6 +69,7 @@ namespace iris {
         cgltf_parse_file(&options, s_path.c_str(), &gltf);
         cgltf_load_buffers(&options, gltf, s_path.c_str());
 
+        auto mesh_cache = std::unordered_map<uint64, uint64>();
         auto texture_cache = std::unordered_map<const void*, uint32>();
         const auto import_texture = [&](const cgltf_texture* texture, texture_type_t type) {
             if (is_texture_valid(texture)) {
@@ -148,64 +149,73 @@ namespace iris {
                             default: break;
                         }
                     }
+
+                    auto mesh_hash = hash_combine(0, reinterpret_cast<uint64>(position_ptr));
+                    mesh_hash = hash_combine(mesh_hash, reinterpret_cast<uint64>(normal_ptr));
+                    mesh_hash = hash_combine(mesh_hash, reinterpret_cast<uint64>(uv_ptr));
+                    mesh_hash = hash_combine(mesh_hash, reinterpret_cast<uint64>(tangent_ptr));
+                    auto cached_mesh = mesh_cache.find(mesh_hash);
                     auto sphere = glm::vec4();
                     auto aabb = aabb_t();
-                    aabb.min = glm::vec3(std::numeric_limits<float32>::max());
-                    aabb.max = glm::vec3(std::numeric_limits<float32>::lowest());
-                    vertices.resize(vertex_count);
-                    for (auto l = 0_u32; l < vertex_count; ++l) {
-                        std::memcpy(&vertices[l].position, position_ptr + l, sizeof(glm::vec3));
-                        if (normal_ptr) {
-                            std::memcpy(&vertices[l].normal, normal_ptr + l, sizeof(glm::vec3));
-                        }
-                        if (uv_ptr) {
-                            std::memcpy(&vertices[l].uv, uv_ptr + l, sizeof(glm::vec2));
-                        }
-                        if (tangent_ptr) {
-                            std::memcpy(&vertices[l].tangent, tangent_ptr + l, sizeof(glm::vec4));
-                        }
-
-                        aabb.min = glm::min(aabb.min, vertices[l].position);
-                        aabb.max = glm::max(aabb.max, vertices[l].position);
-                        //sphere += glm::vec4(vertices[l].position, 0.0f);
-                    }
-                    aabb.center = (aabb.min + aabb.max) / 2.0f;
-                    aabb.extent = aabb.max - aabb.center;
-                    //sphere /= static_cast<float32>(vertex_count);
-                    sphere = glm::make_vec4(aabb.center);
-
-                    for (auto& vertex : vertices) {
-                        sphere.w = glm::max(sphere.w, glm::distance(glm::vec3(sphere), vertex.position));
-                    }
-
                     auto indices = std::vector<uint32>();
-                    {
-                        const auto& accessor = *primitive.indices;
-                        const auto& buffer_view = *accessor.buffer_view;
-                        const auto& buffer = *buffer_view.buffer;
-                        const auto& data_ptr = static_cast<const char*>(buffer.data);
-                        indices.reserve(accessor.count);
-                        switch (accessor.component_type) {
-                            case cgltf_component_type_r_8:
-                            case cgltf_component_type_r_8u: {
-                                const auto* ptr = reinterpret_cast<const uint8*>(data_ptr + buffer_view.offset + accessor.offset);
-                                std::ranges::copy(std::span(ptr, accessor.count), std::back_inserter(indices));
-                            } break;
+                    if (cached_mesh == mesh_cache.end()) {
+                        aabb.min = glm::vec3(std::numeric_limits<float32>::max());
+                        aabb.max = glm::vec3(std::numeric_limits<float32>::lowest());
+                        vertices.resize(vertex_count);
+                        for (auto l = 0_u32; l < vertex_count; ++l) {
+                            std::memcpy(&vertices[l].position, position_ptr + l, sizeof(glm::vec3));
+                            if (normal_ptr) {
+                                std::memcpy(&vertices[l].normal, normal_ptr + l, sizeof(glm::vec3));
+                            }
+                            if (uv_ptr) {
+                                std::memcpy(&vertices[l].uv, uv_ptr + l, sizeof(glm::vec2));
+                            }
+                            if (tangent_ptr) {
+                                std::memcpy(&vertices[l].tangent, tangent_ptr + l, sizeof(glm::vec4));
+                            }
 
-                            case cgltf_component_type_r_16:
-                            case cgltf_component_type_r_16u: {
-                                const auto* ptr = reinterpret_cast<const uint16*>(data_ptr + buffer_view.offset + accessor.offset);
-                                std::ranges::copy(std::span(ptr, accessor.count), std::back_inserter(indices));
-                            } break;
-
-                            case cgltf_component_type_r_32f:
-                            case cgltf_component_type_r_32u: {
-                                const auto* ptr = reinterpret_cast<const uint32*>(data_ptr + buffer_view.offset + accessor.offset);
-                                std::ranges::copy(std::span(ptr, accessor.count), std::back_inserter(indices));
-                            } break;
-
-                            default: break;
+                            aabb.min = glm::min(aabb.min, vertices[l].position);
+                            aabb.max = glm::max(aabb.max, vertices[l].position);
                         }
+                        aabb.center = (aabb.min + aabb.max) / 2.0f;
+                        aabb.extent = aabb.max - aabb.center;
+                        sphere = glm::make_vec4(aabb.center);
+
+                        for (auto& vertex : vertices) {
+                            sphere.w = glm::max(sphere.w, glm::distance(glm::vec3(sphere), vertex.position));
+                        }
+
+                        {
+                            const auto& accessor = *primitive.indices;
+                            const auto& buffer_view = *accessor.buffer_view;
+                            const auto& buffer = *buffer_view.buffer;
+                            const auto& data_ptr = static_cast<const char*>(buffer.data);
+                            indices.reserve(accessor.count);
+                            switch (accessor.component_type) {
+                                case cgltf_component_type_r_8:
+                                case cgltf_component_type_r_8u: {
+                                    const auto* ptr = reinterpret_cast<const uint8*>(data_ptr + buffer_view.offset + accessor.offset);
+                                    std::ranges::copy(std::span(ptr, accessor.count), std::back_inserter(indices));
+                                } break;
+
+                                case cgltf_component_type_r_16:
+                                case cgltf_component_type_r_16u: {
+                                    const auto* ptr = reinterpret_cast<const uint16*>(data_ptr + buffer_view.offset + accessor.offset);
+                                    std::ranges::copy(std::span(ptr, accessor.count), std::back_inserter(indices));
+                                } break;
+
+                                case cgltf_component_type_r_32f:
+                                case cgltf_component_type_r_32u: {
+                                    const auto* ptr = reinterpret_cast<const uint32*>(data_ptr + buffer_view.offset + accessor.offset);
+                                    std::ranges::copy(std::span(ptr, accessor.count), std::back_inserter(indices));
+                                } break;
+
+                                default: break;
+                            }
+                        }
+                        model._meshes.emplace_back(mesh_pool.make_mesh(vertices, indices, vertex_format_as_attributes()));
+                        auto _u_0 = false;
+                        std::tie(cached_mesh, _u_0) = mesh_cache.emplace(mesh_hash, model._meshes.size() - 1);
                     }
 
                     auto diffuse_texture_index = -1_u32;
@@ -245,13 +255,12 @@ namespace iris {
                         }
                     }
 
-                    auto m_mesh = mesh_pool.make_mesh(vertices, indices, vertex_format_as_attributes());
                     auto& object = model._objects.emplace_back();
+                    object.mesh = cached_mesh->second;
                     object.scale = glm::vec3(1.0f);
                     if (node.has_scale) {
                         object.scale = glm::vec3(node.scale[0], node.scale[1], node.scale[2]);
                     }
-                    object.mesh = std::move(m_mesh);
                     object.aabb = aabb;
                     object.sphere = sphere;
                     object.diffuse_texture = diffuse_texture_index;
@@ -266,6 +275,7 @@ namespace iris {
             }
         }
 
+        cgltf_free(gltf);
         iris::log("loaded model: \"", s_path, "\" has ", model._objects.size(), " objects and ", model._textures.size(), " textures");
         return model;
     }
@@ -282,11 +292,16 @@ namespace iris {
         return _textures;
     }
 
+    auto model_t::acquire_mesh(uint32 index) const noexcept -> const mesh_t& {
+        return _meshes[index];
+    }
+
     auto model_t::swap(self& other) noexcept -> void {
         using std::swap;
         swap(_objects, other._objects);
         swap(_transforms, other._transforms);
         swap(_textures, other._textures);
+        swap(_meshes, other._meshes);
     }
 
     meshlet_model_t::meshlet_model_t() noexcept = default;
@@ -310,6 +325,7 @@ namespace iris {
         cgltf_parse_file(&options, s_path.c_str(), &gltf);
         cgltf_load_buffers(&options, gltf, s_path.c_str());
 
+        auto mesh_cache = std::unordered_map<uint64, uint64>();
         auto texture_cache = std::unordered_map<const void*, uint32>();
         const auto import_texture = [&](const cgltf_texture* texture, texture_type_t type) {
             if (is_texture_valid(texture)) {
@@ -354,6 +370,7 @@ namespace iris {
                     }
                     continue;
                 }
+                
                 const auto& mesh = *node.mesh;
                 for (auto j = 0_u32; j < mesh.primitives_count; ++j) {
                     const auto& primitive = mesh.primitives[j];
@@ -449,8 +466,8 @@ namespace iris {
                         }
                     }
 
-                    constexpr auto max_vertices = 32u;
-                    constexpr auto max_triangles = 124u;
+                    constexpr auto max_vertices = 64u;
+                    constexpr auto max_triangles = 126u;
                     constexpr auto cone_weight = 0.0f;
                     const auto max_meshlets = meshopt_buildMeshletsBound(indices.size(), max_vertices, max_triangles);
                     auto meshlets = std::vector<meshopt_Meshlet>(max_meshlets);
@@ -548,6 +565,8 @@ namespace iris {
             }
         }
         meshlet_model._meshlet_count = total_meshlets;
+
+        cgltf_free(gltf);
 
         std::cout
             << "model: " << path << " has:\n"

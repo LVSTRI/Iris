@@ -123,6 +123,7 @@ namespace iris {
             glMakeTextureHandleResidentARB(texture._handle);
             texture._is_resident = true;
         }
+        ktxTexture_Destroy(ktxTexture(ktx));
         return texture;
     }
 
@@ -140,7 +141,7 @@ namespace iris {
         texture._channels = channels;
 
         if (channels == 4 && path.extension() == ".png") {
-            for (auto i = 0_u32; i < width * height * channels; i += channels) {
+            for (auto i = 0_i32; i < width * height * channels; i += channels) {
                 if (data[i + 3] != 255) {
                     texture._is_opaque = false;
                     break;

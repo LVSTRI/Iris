@@ -51,8 +51,8 @@ layout (std140, binding = 0) uniform u_camera {
     float far;
 } camera;
 
-layout (std140, binding = 5) uniform b_directional_lights {
-    directional_light_t[16] directional_lights;
+layout (std140, binding = 5) uniform u_directional_lights {
+    directional_light_t[4] directional_lights;
 };
 
 layout (std430, binding = 6) readonly restrict buffer b_texture {
@@ -73,8 +73,8 @@ vec2 sample_hammersley(in uint i, in uint n) {
 
 vec2 calcualte_depth_plane_bias(in vec3 ddx, in vec3 ddy) {
     vec2 bias_uv = vec2(
-    ddy.y * ddx.z - ddx.y * ddy.z,
-    ddx.x * ddy.z - ddy.x * ddx.z);
+        ddy.y * ddx.z - ddx.y * ddy.z,
+        ddx.x * ddy.z - ddy.x * ddx.z);
     bias_uv *= 1.0 / ((ddx.x * ddy.y) - (ddx.y * ddy.x));
     return bias_uv;
 }
@@ -188,6 +188,18 @@ vec3 hsv_to_rgb(in vec3 hsv) {
     return hsv.z * mix(vec3(1.0), rgb, hsv.y);
 }
 
+vec3 as_srgb(in vec3 color) {
+    vec3 o = vec3(0.0);
+    for (uint i = 0; i < 3; ++i) {
+        if (color[i] < 0.0031308) {
+            o[i] = 12.92 * color[i];
+        } else {
+            o[i] = 1.055 * pow(color[i], 1.0 / 2.4) - 0.055;
+        }
+    }
+    return o;
+}
+
 vec2 calculate_velocity() {
     vec4 clip_pos = i_clip_pos;
     vec4 prev_clip_pos = i_prev_clip_pos;
@@ -195,9 +207,7 @@ vec2 calculate_velocity() {
     clip_pos /= clip_pos.w;
     prev_clip_pos /= prev_clip_pos.w;
 
-    prev_clip_pos.xy = prev_clip_pos.xy * 0.5 + 0.5;
-    clip_pos.xy = clip_pos.xy * 0.5 + 0.5;
-    return clip_pos.xy - prev_clip_pos.xy;
+    return prev_clip_pos.xy - clip_pos.xy;
 }
 
 void main() {
@@ -218,7 +228,7 @@ void main() {
     const float depth_vs = (camera.pv * vec4(i_frag_pos, 1.0)).w;
     const uint cascade = calculate_cascade(depth_vs);
 
-    //vec3 hsv = vec3(fract(M_GOLDEN_CONJ * (object_id * gl_PrimitiveID + 1)), 0.875, 0.85);
+    //vec3 hsv = vec3(fract(M_GOLDEN_CONJ * (i_object_id * gl_PrimitiveID + 1)), 0.875, 0.85);
     //if (i_diffuse_texture == -1) {
     //    hsv = vec3(0.0, 0.0, 0.0);
     //}
@@ -233,6 +243,6 @@ void main() {
         calculate_directional_light(directional_lights[0], diffuse, specular, normal) *
         calculate_shadow(directional_lights[0], normal, depth_vs, cascade);
 
-    o_pixel = vec4(color, 1.0);
+    o_pixel = vec4(as_srgb(color), 1.0);
     o_velocity = calculate_velocity();
 }

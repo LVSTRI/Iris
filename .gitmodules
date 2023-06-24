@@ -26,3 +26,6 @@
 	path = deps/imgui
 	url = https://github.com/ocornut/imgui
 	branch = docking
+[submodule "deps/FidelityFX-FSR2"]
+	path = deps/FidelityFX-FSR2
+	url = https://github.com/JuanDiegoMontoya/FidelityFX-FSR2.git

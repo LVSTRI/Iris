@@ -23,7 +23,7 @@ namespace iris {
 
     auto mesh_pool_t::create() noexcept -> self {
         auto mesh_pool = self();
-        mesh_pool.allocator = allocator_t::create(128_MiB);
+        mesh_pool.allocator = allocator_t::create(2_GiB);
         return mesh_pool;
     }
 

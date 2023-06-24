@@ -165,30 +165,19 @@ namespace iris {
 
     auto make_perspective_frustum(const glm::mat4& pv) noexcept -> frustum_t {
         auto frustum = frustum_t();
-        const auto inv_pv = glm::inverse(pv);
-        auto corners = std::to_array({
-            glm::vec3( 1.0f, -1.0f, 0.0f),
-            glm::vec3(-1.0f, -1.0f, 0.0f),
-            glm::vec3( 1.0f,  1.0f, 0.0f),
-            glm::vec3(-1.0f,  1.0f, 0.0f),
-            glm::vec3( 1.0f, -1.0f, 1.0f),
-            glm::vec3(-1.0f, -1.0f, 1.0f),
-            glm::vec3( 1.0f,  1.0f, 1.0f),
-            glm::vec3(-1.0f,  1.0f, 1.0f),
-        });
+        auto planes = std::array<glm::vec4, 6>();
+        for (auto i = 0_u32; i < 4; ++i) { planes[0][i] = pv[i][3] + pv[i][0]; }
+        for (auto i = 0_u32; i < 4; ++i) { planes[1][i] = pv[i][3] - pv[i][0]; }
+        for (auto i = 0_u32; i < 4; ++i) { planes[2][i] = pv[i][3] + pv[i][1]; }
+        for (auto i = 0_u32; i < 4; ++i) { planes[3][i] = pv[i][3] - pv[i][1]; }
+        for (auto i = 0_u32; i < 4; ++i) { planes[4][i] = pv[i][3] + pv[i][2]; }
+        for (auto i = 0_u32; i < 4; ++i) { planes[5][i] = pv[i][3] - pv[i][2]; }
 
-        for (auto& each : corners) {
-            const auto corner = inv_pv * glm::vec4(each, 1.0f);
-            each = corner / corner.w;
+        for (auto i = 0_u32; i < 6; ++i) {
+            const auto& plane = glm::normalize(planes[i]);
+            frustum.planes[i].normal = glm::vec3(plane);
+            frustum.planes[i].distance = -plane.w;
         }
-
-        frustum.planes[0] = plane_from_points(corners[0], corners[4], corners[2]);
-        frustum.planes[1] = plane_from_points(corners[1], corners[3], corners[5]);
-        frustum.planes[2] = plane_from_points(corners[1], corners[5], corners[0]);
-        frustum.planes[3] = plane_from_points(corners[3], corners[2], corners[7]);
-        frustum.planes[4] = plane_from_points(corners[5], corners[7], corners[4]);
-        frustum.planes[5] = plane_from_points(corners[1], corners[0], corners[3]);
-
         return frustum;
     }
 } // namespace iris
